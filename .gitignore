@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+.sti-state.json
+build/
+install/
+log/
+worlds/hospital/
+gazebo.log
+.sti-native/

@@ -1,0 +1,8 @@
+.git
+.env
+.sti-state.json
+__pycache__
+tests
+README.md
+worlds/hospital/
+.sti-native/

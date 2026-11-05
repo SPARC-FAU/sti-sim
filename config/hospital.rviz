@@ -1,0 +1,83 @@
+Panels:
+- Class: rviz_common/Displays
+  Name: Displays
+Visualization Manager:
+  Class: ''
+  Global Options:
+    Background Color: 35; 35; 40
+    Fixed Frame: base_footprint
+    Frame Rate: 15
+  Displays:
+  - Class: rviz_default_plugins/Grid
+    Name: Grid
+    Enabled: true
+    Cell Size: 1
+    Plane Cell Count: 20
+  - Class: rviz_default_plugins/RobotModel
+    Name: TIAGo Pro
+    Enabled: true
+    Visual Enabled: true
+    Collision Enabled: false
+    Description Source: Topic
+    Description Topic:
+      Value: /robot_description
+      Durability Policy: Transient Local
+      Reliability Policy: Reliable
+      Depth: 1
+  - Class: rviz_default_plugins/TF
+    Name: Frames
+    Enabled: true
+  - Class: rviz_default_plugins/LaserScan
+    Name: Front lidar
+    Enabled: true
+    Topic:
+      Value: /scan_front_raw
+      Reliability Policy: Best Effort
+      Durability Policy: Volatile
+      Depth: 5
+    Size (m): 0.025
+    Style: Points
+  - Class: rviz_default_plugins/LaserScan
+    Name: Rear lidar
+    Enabled: true
+    Topic:
+      Value: /scan_rear_raw
+      Reliability Policy: Best Effort
+      Durability Policy: Volatile
+      Depth: 5
+    Size (m): 0.025
+    Style: Points
+  - Class: rviz_default_plugins/Image
+    Name: Head camera
+    Enabled: true
+    Topic:
+      Value: /head_front_camera/color/image_raw
+      Reliability Policy: Best Effort
+      Durability Policy: Volatile
+      Depth: 5
+  - Class: rviz_default_plugins/PointCloud2
+    Name: Depth cloud (enable when needed)
+    Enabled: false
+    Topic:
+      Value: /head_front_camera/depth/color/points
+      Reliability Policy: Best Effort
+      Durability Policy: Volatile
+      Depth: 2
+    Size (m): 0.01
+    Style: Points
+    Color Transformer: RGB8
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 4
+      Pitch: 0.8
+      Yaw: 0.7
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0
+Window Geometry:
+  Width: 700
+  Height: 550
+  X: 570
+  Y: 0

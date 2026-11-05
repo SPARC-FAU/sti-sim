@@ -1,0 +1,22 @@
+name: sti-sim
+services:
+  sim:
+    image: sti-sim:humble-amd64
+    platform: linux/amd64
+    build:
+      context: .
+    init: true
+    shm_size: 1gb
+    ports:
+      - "127.0.0.1:${STI_PORT:-6080}:6080"
+    environment:
+      STI_RENDER_MODE: ${STI_RENDER_MODE:-auto}
+      STI_EGL_DEVICE: ${STI_EGL_DEVICE:-egl0}
+      DESKTOP_SIZE: ${DESKTOP_SIZE:-1280x800}
+      STI_SCENE: ${STI_SCENE:-hospital}
+    volumes:
+      - workspace:/workspace
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  workspace:

@@ -1,0 +1,172 @@
+import importlib.util
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+import xml.etree.ElementTree as ET
+
+ROOT = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location('sim', ROOT / 'sim.py')
+sim = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sim)
+
+
+class BackendSelection(unittest.TestCase):
+    def setUp(self):
+        access = patch.object(sim, 'check_docker_access')
+        access.start()
+        self.addCleanup(access.stop)
+
+    def test_cpu_never_requests_gpu_even_if_explicit_backend(self):
+        self.assertEqual(sim.choose_backend('cpu', 'nvidia'), 'cpu')
+
+    def test_mac_does_not_request_linux_devices(self):
+        with patch.object(sim.platform, 'system', return_value='Darwin'):
+            self.assertEqual(sim.choose_backend('auto', 'auto'), 'cpu')
+
+    def test_wsl_is_not_mistaken_for_native_linux_gpu_support(self):
+        with patch.object(sim.platform, 'system', return_value='Linux'), patch.object(sim, 'is_wsl', return_value=True):
+            self.assertEqual(sim.choose_backend('auto', 'auto'), 'cpu')
+
+    def test_gpu_start_failure_retries_without_device_mapping(self):
+        calls = []
+
+        def run(command, env):
+            calls.append(command)
+            if 'up' in command and any('compose.nvidia.yaml' in part for part in command):
+                raise sim.subprocess.CalledProcessError(1, command)
+
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(sim, 'ROOT', Path(tmp)), \
+             patch.object(sim, 'STATE', Path(tmp) / 'state.json'), \
+             patch.object(sim.shutil, 'which', return_value='/bin/docker'), \
+             patch.object(sim, 'choose_backend', return_value='nvidia'), \
+             patch.object(sim, 'run', side_effect=run), \
+             patch.object(sim.subprocess, 'run'), \
+             patch.object(sim.sys, 'argv', ['sim.py', 'up']):
+            sim.main()
+            state = sim.json.loads(sim.STATE.read_text())
+        self.assertEqual(state, {'backend': 'cpu', 'mode': 'cpu', 'scene': 'hospital', 'display': 'browser'})
+        starts = [c for c in calls if 'up' in c]
+        self.assertEqual(len(starts), 2)
+        self.assertFalse(any('compose.nvidia.yaml' in part for part in starts[-1]))
+
+    def test_strict_gpu_failure_does_not_fallback(self):
+        def run(command, env):
+            if 'up' in command:
+                raise sim.subprocess.CalledProcessError(1, command)
+
+        with patch.object(sim.shutil, 'which', return_value='/bin/docker'), \
+             patch.object(sim, 'choose_backend', return_value='nvidia'), \
+             patch.object(sim, 'run', side_effect=run), \
+             patch.object(sim.sys, 'argv', ['sim.py', 'up', '--mode', 'gpu']):
+            with self.assertRaises(SystemExit) as error:
+                sim.main()
+        self.assertEqual(error.exception.code, 1)
+
+    def test_sensor_failure_is_reported_without_restarting_workload(self):
+        calls = []
+
+        def run(command, env):
+            calls.append(command)
+            if 'exec' in command:
+                raise sim.subprocess.CalledProcessError(1, command)
+
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(sim, 'ROOT', Path(tmp)), \
+             patch.object(sim, 'STATE', Path(tmp) / 'state.json'), \
+             patch.object(sim.shutil, 'which', return_value='/bin/docker'), \
+             patch.object(sim, 'choose_backend', return_value='nvidia'), \
+             patch.object(sim, 'run', side_effect=run), \
+             patch.object(sim.sys, 'argv', ['sim.py', 'up']):
+            with self.assertRaises(SystemExit):
+                sim.main()
+        self.assertEqual(len([c for c in calls if 'up' in c]), 1)
+        self.assertFalse(any('down' in c for c in calls))
+
+    def test_state_replaces_an_unwritable_previous_file(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(sim, 'ROOT', Path(tmp)), \
+             patch.object(sim, 'STATE', Path(tmp)/'state.json'):
+            sim.STATE.write_text('old state')
+            sim.STATE.chmod(0o444)
+            sim.write_state({'backend': 'cpu'})
+            self.assertEqual(sim.json.loads(sim.STATE.read_text()), {'backend': 'cpu'})
+            self.assertEqual(list(Path(tmp).glob('.sti-state-*')), [])
+
+    def test_world_is_self_contained_and_sensors_match_bridge(self):
+        tree = ET.parse(ROOT / 'worlds/demo.sdf')
+        self.assertEqual(tree.findall('.//include'), [])
+        topics = {s.findtext('topic') for s in tree.findall('.//sensor')}
+        self.assertEqual(topics, {'/scan', '/camera/image'})
+        self.assertEqual(tree.findtext('.//plugin/child_frame_id'), 'base_link')
+
+
+class DockerAccess(unittest.TestCase):
+    def test_permission_error_explains_fix_without_invoking_sudo(self):
+        result = sim.subprocess.CompletedProcess(['docker'], 1, '', 'permission denied connecting to docker.sock')
+        with patch.object(sim.subprocess, 'run', return_value=result) as run:
+            with self.assertRaisesRegex(RuntimeError, 'Do not run sim.py with sudo'):
+                sim.check_docker_access()
+        self.assertEqual(run.call_args.args[0][0], 'docker')
+
+    def test_daemon_not_running_is_not_reported_as_a_permission_error(self):
+        result = sim.subprocess.CompletedProcess(['docker'], 1, '', 'Cannot connect to the Docker daemon')
+        with patch.object(sim.subprocess, 'run', return_value=result):
+            with self.assertRaisesRegex(RuntimeError, 'engine is running'):
+                sim.check_docker_access()
+
+
+class NativeDisplay(unittest.TestCase):
+    def test_native_and_gpu_overrides_are_combined(self):
+        command = sim.compose('dri', 'native')
+        self.assertIn(str(ROOT/'compose.dri.yaml'), command)
+        self.assertIn(str(ROOT/'compose.native.yaml'), command)
+
+    def test_browser_needs_no_host_authentication(self):
+        with patch.object(sim.subprocess, 'run') as run:
+            self.assertEqual(sim.display_environment('browser', prepare=True), {})
+        run.assert_not_called()
+
+    def test_native_mode_rejects_mac_and_wsl(self):
+        with patch.object(sim.platform, 'system', return_value='Darwin'):
+            with self.assertRaisesRegex(RuntimeError, 'desktop Linux'):
+                sim.display_environment('native')
+        with patch.object(sim.platform, 'system', return_value='Linux'), patch.object(sim, 'is_wsl', return_value=True):
+            with self.assertRaisesRegex(RuntimeError, 'desktop Linux'):
+                sim.display_environment('native')
+
+    def test_inspection_does_not_require_display(self):
+        with patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'is_wsl', return_value=False), \
+             patch.dict(sim.os.environ, {'DISPLAY': ''}), \
+             patch.object(sim.subprocess, 'run') as run:
+            self.assertEqual(sim.display_environment('native')['STI_HOST_DISPLAY'], ':0')
+        run.assert_not_called()
+
+    def test_cookie_permissions_and_no_secrets_in_arguments(self):
+        record = '0100 0004 686f7374 0001 30 0012 4d49542d4d414749432d434f4f4b49452d31 0004 12345678\n'
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append((command, kwargs))
+            return sim.subprocess.CompletedProcess(command, 0, record if 'nlist' in command else '', '')
+
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(sim, 'ROOT', Path(directory)), \
+             patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'is_wsl', return_value=False), \
+             patch.object(sim.shutil, 'which', return_value='/bin/xauth'), \
+             patch.dict(sim.os.environ, {'DISPLAY': ':0'}), \
+             patch.object(sim.subprocess, 'run', side_effect=run):
+            env = sim.display_environment('native', prepare=True)
+            cookie = Path(env['STI_NATIVE_AUTH_DIR'])/'Xauthority'
+            self.assertEqual(cookie.stat().st_mode & 0o777, 0o640)
+            self.assertEqual(cookie.parent.stat().st_mode & 0o777, 0o750)
+            self.assertEqual(calls[0][0], ['xauth', 'nlist', ':0'])
+            self.assertTrue(calls[1][1]['input'].startswith('ffff'))
+            self.assertFalse(any('12345678' in arg for command, _ in calls for arg in command))
+
+
+if __name__ == '__main__':
+    unittest.main()

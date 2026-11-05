@@ -1,0 +1,8 @@
+# World origin: centre of the supplied floor; metres, Z-up.
+# The generated floor plan puts this point in the open central corridor.
+initial_pose: home
+spawn:
+  x: 1.0
+  y: 0.0
+  z: 0.05
+  yaw: 1.57079632679

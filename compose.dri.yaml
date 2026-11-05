@@ -1,0 +1,7 @@
+services:
+  sim:
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${STI_RENDER_GID:?Set STI_RENDER_GID to the render device group}"
+      - "${STI_VIDEO_GID:?Set STI_VIDEO_GID to the card device group}"

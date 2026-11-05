@@ -1,0 +1,18 @@
+services:
+  sim:
+    environment:
+      STI_DISPLAY: native
+      DISPLAY: ${STI_HOST_DISPLAY:?Set by sim.py for native windows}
+      XAUTHORITY: /tmp/sti-native-auth/Xauthority
+      QT_QPA_PLATFORM: xcb
+    volumes:
+      - type: bind
+        source: /tmp/.X11-unix
+        target: /tmp/.X11-unix
+        read_only: true
+      - type: bind
+        source: ${STI_NATIVE_AUTH_DIR:?Set by sim.py for native windows}
+        target: /tmp/sti-native-auth
+        read_only: true
+    group_add:
+      - "${STI_HOST_GID:?Set by sim.py for native windows}"

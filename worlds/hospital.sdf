@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<sdf version="1.8">
+  <world name="hospital">
+    <physics name="physics" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1</real_time_factor>
+    </physics>
+    <gravity>0 0 -9.81</gravity>
+    <plugin filename="libignition-gazebo-physics-system.so" name="ignition::gazebo::systems::Physics"/>
+    <plugin filename="libignition-gazebo-user-commands-system.so" name="ignition::gazebo::systems::UserCommands"/>
+    <plugin filename="libignition-gazebo-scene-broadcaster-system.so" name="ignition::gazebo::systems::SceneBroadcaster"/>
+    <plugin filename="libignition-gazebo-sensors-system.so" name="ignition::gazebo::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin filename="libignition-gazebo-imu-system.so" name="ignition::gazebo::systems::Imu"/>
+    <scene><ambient>0.7 0.7 0.7 1</ambient><background>0.75 0.8 0.85 1</background><shadows>false</shadows></scene>
+    <light name="sun" type="directional">
+      <pose>0 0 10 0 0 0</pose><diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.1 0.1 0.1 1</specular><direction>-0.3 0.2 -1</direction><cast_shadows>false</cast_shadows>
+    </light>
+    <model name="hospital_arena">
+      <static>true</static>
+      <link name="building">
+        <visual name="hospital_visual">
+          <geometry><mesh><uri>hospital/hospital.obj</uri></mesh></geometry>
+        </visual>
+        <collision name="walls_and_equipment">
+          <geometry><mesh><uri>hospital/hospital_collision.obj</uri></mesh></geometry>
+        </collision>
+        <!-- A single physical floor avoids duplicate coplanar contacts. -->
+        <collision name="floor">
+          <geometry><plane><normal>0 0 1</normal><size>16 13</size></plane></geometry>
+          <surface><friction><ode><mu>1</mu><mu2>1</mu2></ode></friction></surface>
+        </collision>
+      </link>
+    </model>
+  </world>
+</sdf>

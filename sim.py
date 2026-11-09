@@ -19,12 +19,18 @@ def is_wsl():
     return 'microsoft' in platform.release().lower()
 
 
-def choose_backend(mode, requested):
+def choose_backend(mode, requested, display='browser'):
     if mode == 'cpu':
         return 'cpu'
     if requested != 'auto':
         return requested
-    if platform.system() == 'Linux' and not is_wsl():
+    if platform.system() == 'Linux' and is_wsl():
+        if (display == 'native' and Path('/dev/dxg').exists()
+                and Path('/usr/lib/wsl/lib/libd3d12.so').exists()
+                and Path('/usr/lib/wsl/lib/libdxcore.so').exists()):
+            return 'wslgpu'
+        return 'cpu'
+    if platform.system() == 'Linux':
         if Path('/dev/nvidiactl').exists():
             return 'nvidia'
         if glob.glob('/dev/dri/renderD*'):
@@ -45,6 +51,8 @@ def compose(backend, display='browser'):
 def environment(mode, backend):
     env = os.environ.copy()
     env['STI_RENDER_MODE'] = mode
+    if backend == 'wslgpu':
+        env['STI_DXG_GID'] = str(os.stat('/dev/dxg').st_gid)
     if backend == 'dri':
         renders = sorted(glob.glob('/dev/dri/renderD*'))
         cards = sorted(glob.glob('/dev/dri/card*'))
@@ -158,7 +166,7 @@ def main():
     try:
         check_docker_access()
         run(['docker', 'compose', 'version'], os.environ.copy())
-        backend = choose_backend(args.mode, args.backend)
+        backend = choose_backend(args.mode, args.backend, args.display)
         mode = args.mode
         scene = args.scene
         display = args.display
@@ -168,7 +176,10 @@ def main():
             scene = state.get('scene', 'demo')
             display = state.get('display', 'browser')
         if args.command == 'up' and mode == 'gpu' and backend == 'cpu':
-            raise RuntimeError('No supported GPU backend detected. Use Linux GPU access or --mode cpu.')
+            raise RuntimeError('No supported GPU backend detected. WSLg GPU mode requires --display native, /dev/dxg and WSL GPU libraries. Update WSL and the Windows GPU driver, or use --mode cpu.')
+        # WSL without the GPU overlay must use the portable software path.
+        if is_wsl() and backend == 'cpu' and mode == 'auto':
+            mode = 'cpu'
         env = environment(mode, backend)
         env['STI_SCENE'] = scene
         env.update(display_environment(display, prepare=args.command == 'up'))

@@ -23,12 +23,17 @@ if ! timeout 5 xdpyinfo > /tmp/sti/display-probe.log 2>&1; then
   echo 'Cannot connect to the selected X display. Check DISPLAY and Xauthority; see /tmp/sti/display-probe.log.'
   exit 1
 fi
+# Preserve the ROS library search path while adding Microsoft's WSL libraries.
+if [[ "${STI_WSL_GPU:-0}" == 1 ]]; then
+  export LD_LIBRARY_PATH="/usr/lib/wsl/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
 mode=cpu
 if [[ "$STI_RENDER_MODE" != cpu ]]; then
   probe=(/opt/VirtualGL/bin/vglrun -d "$STI_EGL_DEVICE" -c proxy glxinfo -B)
   if [[ "${STI_DISPLAY:-browser}" == native ]]; then probe=(glxinfo -B); fi
+  if [[ "${STI_WSL_GPU:-0}" == 1 ]]; then probe=(env GALLIUM_DRIVER=d3d12 glxinfo -B); fi
   if timeout 15 "${probe[@]}" > /tmp/sti/gpu-probe.log 2>&1 \
-      && ! grep -Eqi 'llvmpipe|softpipe|lavapipe|software rasterizer' /tmp/sti/gpu-probe.log \
+      && ! grep -Eqi 'llvmpipe|softpipe|lavapipe|software rasterizer|Microsoft Basic Render' /tmp/sti/gpu-probe.log \
       && grep -q 'OpenGL renderer string:' /tmp/sti/gpu-probe.log; then
     mode=gpu
   elif [[ "$STI_RENDER_MODE" == gpu ]]; then

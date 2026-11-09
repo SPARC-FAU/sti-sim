@@ -54,13 +54,13 @@ continue using a shared environment.
 | --- | --- |
 | Native Linux, Intel/AMD | Try VirtualGL/EGL using `/dev/dri`; CPU fallback |
 | Native Linux, NVIDIA | Try NVIDIA Container Toolkit + VirtualGL/EGL; CPU fallback |
-| Windows with Docker Desktop/WSL2 | Browser desktop or WSLg native windows; CPU rendering |
+| Windows with Docker Desktop/WSL2 | WSLg native windows: try Direct3D GPU, CPU fallback; browser: CPU |
 | Intel macOS with Docker Desktop | Browser desktop with CPU rendering |
 | Apple Silicon | amd64 emulation plus CPU rendering; potentially very slow |
 
-Windows GPU integration is deliberately not selected automatically: WSLg GPU
-access and acceleration in a browser desktop are different paths and require
-their own validation. No claim of hardware coverage or real-time performance has
+Windows GPU selection is available for WSLg native windows. Browser display on
+Windows continues to use CPU rendering. WSLg GPU support still needs validation
+on representative Windows hardware. No claim of hardware coverage or real-time performance has
 been established yet.
 
 ## Start
@@ -119,14 +119,16 @@ X socket are mounted read-only. No `xhost +` or privileged container is needed.
 Native mode bypasses Xvfb, VNC and VirtualGL. Configuration and launcher tests
 pass; a live desktop acceptance run is still required.
 
-### Windows windows through WSLg
+### Windows native windows through WSLg
 
 Use an up-to-date WSL2 installation with WSLg, an Ubuntu distribution, and Docker
 Desktop's WSL2 engine with integration enabled for that distribution. Run these
 commands from an **Ubuntu WSL terminal**, in the repository:
 
 ```sh
-python3 sim.py up --display native --mode cpu
+python3 sim.py up --display native             # Try GPU; fall back to CPU
+python3 sim.py up --display native --mode gpu  # Require GPU
+python3 sim.py up --display native --mode cpu  # Force CPU
 ```
 
 Gazebo and RViz should appear as ordinary Windows windows. This uses the WSLg
@@ -137,11 +139,23 @@ run `wsl --update` and then `wsl --shutdown` from PowerShell, reopen Ubuntu and
 retry. Docker Desktop must be running. If Docker reports a missing socket bind
 source, check that WSL integration is enabled for this Ubuntu distribution.
 
-This initial WSLg path uses CPU rendering. `--mode auto` also selects CPU on
-WSL; WSLg GPU device/library forwarding is not configured yet. Native display
-avoids the VNC desktop but does not itself accelerate rendering. This path has
-launcher/configuration coverage; it still needs a live Windows acceptance test.
-macOS continues to use browser display.
+GPU mode forwards `/dev/dxg` and `/usr/lib/wsl` and uses Mesa's Direct3D 12
+backend. It requires an up-to-date Windows GPU driver supporting WSLg. The
+container uses its own Mesa libraries; no Linux NVIDIA driver or NVIDIA
+Container Toolkit is required for this Direct3D display path. Startup probes the
+actual OpenGL renderer, rejecting software renderers. In `auto`, missing host
+GPU resources select CPU immediately, and a failed GPU container start retries
+without GPU mounts. `--mode gpu` reports failure instead of accepting software
+rendering. An application/sensor failure after startup remains a reported failure.
+
+Look for `STI rendering: gpu` and an `OpenGL renderer string` naming D3D12 and
+your GPU. `llvmpipe` means CPU rendering. Integrated/discrete GPU selection follows
+Mesa's defaults; optionally set `MESA_D3D12_DEFAULT_ADAPTER_NAME` in the Compose
+GPU overlay to a substring of the desired adapter name.
+
+The forwarding, selection and fallback logic have local test coverage. Actual
+GPU rendering still needs a Windows acceptance run; this Linux host cannot
+validate a WSL GPU. macOS continues to use browser display.
 
 See [Microsoft's WSLg container guide](https://github.com/microsoft/wslg/blob/main/samples/container/Containers.md)
 for the underlying display and GPU forwarding mechanisms.

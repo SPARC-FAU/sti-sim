@@ -28,6 +28,51 @@ class BackendSelection(unittest.TestCase):
         with patch.object(sim.platform, 'system', return_value='Linux'), patch.object(sim, 'is_wsl', return_value=True):
             self.assertEqual(sim.choose_backend('auto', 'auto'), 'cpu')
 
+    def test_wslg_gpu_requires_native_display_and_host_resources(self):
+        with patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'is_wsl', return_value=True), \
+             patch.object(sim.Path, 'exists', return_value=True):
+            self.assertEqual(sim.choose_backend('auto', 'auto', 'native'), 'wslgpu')
+            self.assertEqual(sim.choose_backend('auto', 'auto', 'browser'), 'cpu')
+            self.assertEqual(sim.choose_backend('cpu', 'auto', 'native'), 'cpu')
+        with patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'is_wsl', return_value=True), \
+             patch.object(sim.Path, 'exists', return_value=False):
+            self.assertEqual(sim.choose_backend('auto', 'auto', 'native'), 'cpu')
+
+    def test_wslg_gpu_failure_preserves_native_display_on_cpu_retry(self):
+        calls = []
+
+        def run(command, env):
+            calls.append((command, env.copy()))
+            if 'up' in command and any('compose.wslgpu.yaml' in part for part in command):
+                raise sim.subprocess.CalledProcessError(1, command)
+
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(sim, 'ROOT', Path(tmp)), \
+             patch.object(sim, 'STATE', Path(tmp)/'state.json'), \
+             patch.object(sim.shutil, 'which', return_value='/bin/docker'), \
+             patch.object(sim, 'is_wsl', return_value=True), \
+             patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'choose_backend', return_value='wslgpu'), \
+             patch.object(sim.os, 'stat') as stat, \
+             patch.object(sim.Path, 'is_socket', return_value=True), \
+             patch.dict(sim.os.environ, {'DISPLAY': ':0'}), \
+             patch.object(sim, 'run', side_effect=run), \
+             patch.object(sim.subprocess, 'run'), \
+             patch.object(sim.sys, 'argv', ['sim.py', 'up', '--display', 'native']):
+            stat.return_value.st_gid = 44
+            sim.main()
+            state = sim.json.loads(sim.STATE.read_text())
+        starts = [(cmd, env) for cmd, env in calls if 'up' in cmd]
+        self.assertEqual(len(starts), 2)
+        self.assertTrue(any('compose.wslgpu.yaml' in part for part in starts[0][0]))
+        self.assertFalse(any('compose.wslgpu.yaml' in part for part in starts[1][0]))
+        self.assertTrue(any('compose.wslg.yaml' in part for part in starts[1][0]))
+        self.assertEqual(starts[1][1]['STI_RENDER_MODE'], 'cpu')
+        self.assertEqual(state['display'], 'native')
+        self.assertEqual(state['backend'], 'cpu')
+
     def test_gpu_start_failure_retries_without_device_mapping(self):
         calls = []
 

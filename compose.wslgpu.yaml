@@ -1,0 +1,16 @@
+# WSLg Direct3D GPU access; combined with compose.wslg.yaml by sim.py.
+services:
+  sim:
+    environment:
+      STI_WSL_GPU: "1"
+    devices:
+      - /dev/dxg:/dev/dxg
+    group_add:
+      - "${STI_DXG_GID:?Set by sim.py for the WSL GPU device}"
+    volumes:
+      - type: bind
+        source: /usr/lib/wsl
+        target: /usr/lib/wsl
+        read_only: true
+        bind:
+          create_host_path: false

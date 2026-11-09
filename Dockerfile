@@ -6,7 +6,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 COPY docker/apt-packages.txt /tmp/sti-apt-packages.txt
 RUN apt-get update \
-    && sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' /tmp/sti-apt-packages.txt \
+    && sed 's/\r$//; /^[[:space:]]*#/d; /^[[:space:]]*$/d' /tmp/sti-apt-packages.txt \
       | xargs -r apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* /tmp/sti-apt-packages.txt
 

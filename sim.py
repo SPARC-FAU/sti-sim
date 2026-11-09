@@ -37,7 +37,8 @@ def compose(backend, display='browser'):
     if backend != 'cpu':
         result += ['-f', str(ROOT / f'compose.{backend}.yaml')]
     if display == 'native':
-        result += ['-f', str(ROOT / 'compose.native.yaml')]
+        overlay = 'compose.wslg.yaml' if is_wsl() else 'compose.native.yaml'
+        result += ['-f', str(ROOT / overlay)]
     return result
 
 
@@ -61,8 +62,18 @@ def run(args, env):
 def display_environment(display, prepare=False):
     if display == 'browser':
         return {}
-    if platform.system() != 'Linux' or is_wsl():
-        raise RuntimeError('Native windows currently support desktop Linux only. Use --display browser on Windows/macOS.')
+    if platform.system() != 'Linux':
+        raise RuntimeError('Native windows require desktop Linux or an Ubuntu WSL2 terminal with WSLg. On Windows, run this command inside WSL, not PowerShell. Use --display browser on macOS.')
+    if is_wsl():
+        host_display = os.environ.get('DISPLAY', ':0')
+        socket_directory = Path('/mnt/wslg/.X11-unix')
+        if prepare:
+            if not host_display.startswith(':') or not host_display[1:].split('.')[0].isdigit():
+                raise RuntimeError('WSLg needs its local DISPLAY (normally :0). Remove any custom DISPLAY override in your WSL shell.')
+            socket = socket_directory / ('X' + host_display[1:].split('.')[0])
+            if not socket.is_socket():
+                raise RuntimeError('WSLg X11 socket is unavailable. Update WSL with `wsl --update` in PowerShell, restart WSL, and run from an Ubuntu WSL2 terminal.')
+        return {'STI_HOST_DISPLAY': host_display, 'STI_WSLG_X11_DIR': str(socket_directory)}
     host_display = os.environ.get('DISPLAY', '')
     if not host_display.startswith(':'):
         if prepare:
@@ -187,7 +198,7 @@ def main():
                            'source /opt/ros/humble/setup.bash && python3 /opt/sti/scripts/check.py'], env)
             run(command + ['exec', '-T', 'sim', 'cat', '/tmp/sti/renderer.log'], env)
             if display == 'native':
-                print('Gazebo and RViz open as windows on your Linux desktop.')
+                print('Gazebo and RViz open as windows on your desktop.')
             else:
                 print(f"Open http://localhost:{env.get('STI_PORT', '6080')}/vnc.html?autoconnect=true&resize=scale")
         elif args.command == 'doctor':

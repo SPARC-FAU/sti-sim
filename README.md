@@ -10,17 +10,51 @@ available for graphics troubleshooting. No host X server or VNC client is requir
 
 Initial amd64 integration. The supplied hospital asset has been converted and its
 scale, orientation and spawn clearance checked against the geometry. Configuration,
-conversion and launcher tests can run without Docker. An image build and real
-GUI/GPU acceptance runs are still required before distributing this as the tested
-course environment. Docker daemon access was unavailable in the implementation
-session, so PAL package installation and runtime compatibility are not yet verified.
+conversion and launcher tests can run without Docker. The updated amd64 image
+passes dependency imports, C++17 ROS compilation, launch-description loading and
+the hospital physics smoke test. Representative GUI/GPU and student-workflow
+acceptance runs are still needed before distributing it as the tested course image.
 PAL controllers are launched, but autonomous navigation and MoveIt are not started.
+
+## Course foundation and student work
+
+The image provides the dependencies listed in `docker/apt-packages.txt`:
+
+| Area | Installed tools/libraries |
+| --- | --- |
+| Package development | C++17-capable compiler, CMake, ament, colcon, rosdep, vcstool, Git and Python development tools |
+| Navigation | Nav2, its bring-up package and SLAM Toolbox |
+| Manipulation | MoveIt 2, TIAGo Pro's MoveIt configuration, MoveIt Task Constructor and ros2_control/controllers |
+| Perception | OpenCV, NumPy and cv_bridge |
+| Simulation/inspection | Gazebo Fortress, PAL robot packages, RViz and image inspection |
+
+Installing a library doesn't start its application servers. The common launch
+provides the robot, sensors and low-level controllers. Students configure and
+launch navigation, localisation/mapping and motion planning, and implement their
+own perception, grasp sequences, task interfaces, state machines, recovery,
+clinical constraints and evaluation. No prepared navigation map for this hospital,
+configured coursework pipelines, hospital-device mocks or completed coursework
+tasks are supplied. Standard examples/configuration shipped by upstream packages
+remain available as learning resources.
+
+The image build checks package availability, Python imports and compilation of
+a minimal C++17 ROS program. To repeat the dependency check inside the container:
+
+```sh
+python3 /opt/sti/scripts/check_dependencies.py
+```
+
+Use a sourced ROS terminal, for example `python3 sim.py shell`. Students can
+create and build their own packages under `/workspace`; an external editor is a
+choice rather than a required additional runtime application. New system
+dependencies should be recorded in the image package list and rebuilt, so teams
+continue using a shared environment.
 
 | Host | First-release graphics path |
 | --- | --- |
 | Native Linux, Intel/AMD | Try VirtualGL/EGL using `/dev/dri`; CPU fallback |
 | Native Linux, NVIDIA | Try NVIDIA Container Toolkit + VirtualGL/EGL; CPU fallback |
-| Windows with Docker Desktop/WSL2 | Browser desktop with CPU rendering |
+| Windows with Docker Desktop/WSL2 | Browser desktop or WSLg native windows; CPU rendering |
 | Intel macOS with Docker Desktop | Browser desktop with CPU rendering |
 | Apple Silicon | amd64 emulation plus CPU rendering; potentially very slow |
 
@@ -82,9 +116,35 @@ if acceleration cannot be established.
 The launcher exports the active display's authentication records to an ignored
 `.sti-native/` directory, readable by your primary group. The cookie directory and
 X socket are mounted read-only. No `xhost +` or privileged container is needed.
-Native mode bypasses Xvfb, VNC and VirtualGL. Windows/macOS/WSL native windows are
-not covered by this option. Configuration and launcher tests pass; a live native
-desktop acceptance run is still required.
+Native mode bypasses Xvfb, VNC and VirtualGL. Configuration and launcher tests
+pass; a live desktop acceptance run is still required.
+
+### Windows windows through WSLg
+
+Use an up-to-date WSL2 installation with WSLg, an Ubuntu distribution, and Docker
+Desktop's WSL2 engine with integration enabled for that distribution. Run these
+commands from an **Ubuntu WSL terminal**, in the repository:
+
+```sh
+python3 sim.py up --display native --mode cpu
+```
+
+Gazebo and RViz should appear as ordinary Windows windows. This uses the WSLg
+X11 socket; it needs neither a browser nor a separately installed Windows X
+server. Keep WSLg's default `DISPLAY` (normally `:0`); remove old X-server
+`DISPLAY` overrides from your shell configuration. If the socket is missing,
+run `wsl --update` and then `wsl --shutdown` from PowerShell, reopen Ubuntu and
+retry. Docker Desktop must be running. If Docker reports a missing socket bind
+source, check that WSL integration is enabled for this Ubuntu distribution.
+
+This initial WSLg path uses CPU rendering. `--mode auto` also selects CPU on
+WSL; WSLg GPU device/library forwarding is not configured yet. Native display
+avoids the VNC desktop but does not itself accelerate rendering. This path has
+launcher/configuration coverage; it still needs a live Windows acceptance test.
+macOS continues to use browser display.
+
+See [Microsoft's WSLg container guide](https://github.com/microsoft/wslg/blob/main/samples/container/Containers.md)
+for the underlying display and GPU forwarding mechanisms.
 
 Use `python3 sim.py up --display browser` to return to the browser desktop at
 <http://localhost:6080/vnc.html?autoconnect=true&resize=scale>. These are two modes

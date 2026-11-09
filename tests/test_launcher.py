@@ -128,13 +128,39 @@ class NativeDisplay(unittest.TestCase):
             self.assertEqual(sim.display_environment('browser', prepare=True), {})
         run.assert_not_called()
 
-    def test_native_mode_rejects_mac_and_wsl(self):
-        with patch.object(sim.platform, 'system', return_value='Darwin'):
-            with self.assertRaisesRegex(RuntimeError, 'desktop Linux'):
-                sim.display_environment('native')
-        with patch.object(sim.platform, 'system', return_value='Linux'), patch.object(sim, 'is_wsl', return_value=True):
-            with self.assertRaisesRegex(RuntimeError, 'desktop Linux'):
-                sim.display_environment('native')
+    def test_native_mode_rejects_mac_and_powershell(self):
+        for system in ('Darwin', 'Windows'):
+            with patch.object(sim.platform, 'system', return_value=system):
+                with self.assertRaisesRegex(RuntimeError, 'Ubuntu WSL2 terminal'):
+                    sim.display_environment('native')
+
+    def test_wslg_uses_socket_without_exporting_host_cookie(self):
+        with patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'is_wsl', return_value=True), \
+             patch.dict(sim.os.environ, {'DISPLAY': ':0'}), \
+             patch.object(sim.Path, 'is_socket', return_value=True), \
+             patch.object(sim.subprocess, 'run') as run:
+            env = sim.display_environment('native', prepare=True)
+            self.assertEqual(env, {'STI_HOST_DISPLAY': ':0', 'STI_WSLG_X11_DIR': '/mnt/wslg/.X11-unix'})
+            self.assertIn(str(ROOT/'compose.wslg.yaml'), sim.compose('cpu', 'native'))
+            self.assertNotIn(str(ROOT/'compose.native.yaml'), sim.compose('cpu', 'native'))
+        run.assert_not_called()
+
+    def test_wslg_reports_missing_socket_before_starting_container(self):
+        with patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'is_wsl', return_value=True), \
+             patch.dict(sim.os.environ, {'DISPLAY': ':0'}), \
+             patch.object(sim.Path, 'is_socket', return_value=False):
+            with self.assertRaisesRegex(RuntimeError, 'WSLg X11 socket is unavailable'):
+                sim.display_environment('native', prepare=True)
+            self.assertEqual(sim.display_environment('native')['STI_HOST_DISPLAY'], ':0')
+
+    def test_wslg_rejects_old_external_x_server_override(self):
+        with patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'is_wsl', return_value=True), \
+             patch.dict(sim.os.environ, {'DISPLAY': '192.168.1.2:0'}):
+            with self.assertRaisesRegex(RuntimeError, 'Remove any custom DISPLAY'):
+                sim.display_environment('native', prepare=True)
 
     def test_inspection_does_not_require_display(self):
         with patch.object(sim.platform, 'system', return_value='Linux'), \

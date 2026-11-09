@@ -1,0 +1,14 @@
+# Run from an Ubuntu WSL2 terminal with Docker Desktop WSL integration.
+services:
+  sim:
+    environment:
+      STI_DISPLAY: native
+      DISPLAY: ${STI_HOST_DISPLAY:?Set by sim.py for WSLg windows}
+      QT_QPA_PLATFORM: xcb
+    volumes:
+      - type: bind
+        source: ${STI_WSLG_X11_DIR:?Set by sim.py for WSLg windows}
+        target: /tmp/.X11-unix
+        read_only: true
+        bind:
+          create_host_path: false

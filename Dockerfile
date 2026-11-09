@@ -4,15 +4,11 @@ ARG TARGETARCH
 RUN test "${TARGETARCH:-amd64}" = amd64
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ros-humble-ros-gz ros-humble-rviz2 ros-humble-tf2-ros \
-    ros-humble-rqt-image-view ros-humble-tiago-pro-gazebo \
-    ros-humble-tiago-pro-description ros-humble-gz-ros2-control \
-    ros-humble-teleop-twist-keyboard \
-    xvfb x11vnc novnc websockify openbox xterm supervisor \
-    mesa-utils libgl1-mesa-dri libegl1 libglu1-mesa x11-utils \
-    curl ca-certificates python3-yaml git nano procps \
-    && rm -rf /var/lib/apt/lists/*
+COPY docker/apt-packages.txt /tmp/sti-apt-packages.txt
+RUN apt-get update \
+    && sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' /tmp/sti-apt-packages.txt \
+      | xargs -r apt-get install -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* /tmp/sti-apt-packages.txt
 
 # Upstream release asset, pinned and checked independently of apt packages.
 RUN curl -fL --retry 3 \
@@ -33,6 +29,7 @@ RUN chmod +x /opt/sti/scripts/*.sh \
     && python3 /opt/sti/scripts/prepare_hospital.py \
       /opt/sti/worlds/2026_09_01_RoboCup_HCC_Arena_V1.glb /opt/sti/worlds/hospital \
     && source /opt/ros/humble/setup.bash \
+    && python3 /opt/sti/scripts/check_dependencies.py \
     && ros2 launch /opt/sti/scripts/hospital.launch.py --show-args \
     && python3 /opt/sti/scripts/validate_world.py
 ENV DISPLAY=:1 QT_X11_NO_MITSHM=1 QT_LOGGING_RULES="qt.qpa.*=false" \

@@ -5,6 +5,11 @@ services:
       STI_DISPLAY: native
       DISPLAY: ${STI_HOST_DISPLAY:?Set by sim.py for WSLg windows}
       QT_QPA_PLATFORM: xcb
+      # WSLg handles Windows scaling; avoid an additional automatic Qt multiplier.
+      QT_ENABLE_HIGHDPI_SCALING: "0"
+      QT_AUTO_SCREEN_SCALE_FACTOR: "0"
+      QT_FONT_DPI: "96"
+      QT_SCALE_FACTOR: ${STI_GUI_SCALE:-1}
     volumes:
       - type: bind
         source: ${STI_WSLG_X11_DIR:?Set by sim.py for WSLg windows}

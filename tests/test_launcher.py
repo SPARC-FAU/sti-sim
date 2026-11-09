@@ -13,6 +13,9 @@ spec.loader.exec_module(sim)
 
 class BackendSelection(unittest.TestCase):
     def setUp(self):
+        diagnostics = patch.object(sim, 'collect_diagnostics')
+        diagnostics.start()
+        self.addCleanup(diagnostics.stop)
         access = patch.object(sim, 'check_docker_access')
         access.start()
         self.addCleanup(access.stop)
@@ -101,7 +104,10 @@ class BackendSelection(unittest.TestCase):
             if 'up' in command:
                 raise sim.subprocess.CalledProcessError(1, command)
 
-        with patch.object(sim.shutil, 'which', return_value='/bin/docker'), \
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(sim, 'ROOT', Path(tmp)), \
+             patch.object(sim, 'STATE', Path(tmp)/'state.json'), \
+             patch.object(sim.shutil, 'which', return_value='/bin/docker'), \
              patch.object(sim, 'choose_backend', return_value='nvidia'), \
              patch.object(sim, 'run', side_effect=run), \
              patch.object(sim.sys, 'argv', ['sim.py', 'up', '--mode', 'gpu']):
@@ -160,6 +166,34 @@ class DockerAccess(unittest.TestCase):
         with patch.object(sim.subprocess, 'run', return_value=result):
             with self.assertRaisesRegex(RuntimeError, 'engine is running'):
                 sim.check_docker_access()
+
+
+class FailureDiagnostics(unittest.TestCase):
+    def test_stopped_container_logs_are_copied_before_printing(self):
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append(command)
+            if 'cp' in command:
+                Path(command[-1]).write_text('saved graphics error')
+            return sim.subprocess.CompletedProcess(command, 0)
+
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(sim, 'ROOT', Path(tmp)), \
+             patch.object(sim.subprocess, 'run', side_effect=run), \
+             patch('builtins.print') as output:
+            sim.collect_diagnostics(['docker', 'compose'], {})
+            copies = list((Path(tmp)/'.sti-diagnostics').glob('startup-*/gpu-probe.log'))
+            self.assertEqual(len(copies), 1)
+            self.assertEqual(copies[0].read_text(), 'saved graphics error')
+            self.assertTrue(any('saved graphics error' in str(c) for c in output.call_args_list))
+        self.assertTrue(any('logs' in command for command in calls))
+        self.assertFalse(any('exec' in command for command in calls))
+
+    def test_failed_diagnostics_do_not_raise_another_error(self):
+        with patch.object(sim.subprocess, 'run', side_effect=OSError('Docker unavailable')), \
+             patch('builtins.print'):
+            sim.collect_diagnostics(['docker', 'compose'], {})
 
 
 class NativeDisplay(unittest.TestCase):

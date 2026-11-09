@@ -20,6 +20,7 @@ if [[ "${STI_DISPLAY:-browser}" == browser ]]; then
   done
 fi
 if ! timeout 5 xdpyinfo > /tmp/sti/display-probe.log 2>&1; then
+  cat /tmp/sti/display-probe.log
   echo 'Cannot connect to the selected X display. Check DISPLAY and Xauthority; see /tmp/sti/display-probe.log.'
   exit 1
 fi
@@ -45,7 +46,11 @@ if [[ "$STI_RENDER_MODE" != cpu ]]; then
   fi
 fi
 printf '%s\n' "$mode" > /tmp/sti/render-mode
-/opt/sti/scripts/render.sh glxinfo -B > /tmp/sti/renderer.log
+if ! timeout 20 /opt/sti/scripts/render.sh glxinfo -B > /tmp/sti/renderer.log 2>&1; then
+  cat /tmp/sti/renderer.log
+  echo "Renderer verification failed or timed out (selected mode: $mode)."
+  exit 1
+fi
 echo "STI rendering: $mode"
 cat /tmp/sti/renderer.log
 config=/opt/sti/config/supervisord.conf

@@ -139,6 +139,22 @@ run `wsl --update` and then `wsl --shutdown` from PowerShell, reopen Ubuntu and
 retry. Docker Desktop must be running. If Docker reports a missing socket bind
 source, check that WSL integration is enabled for this Ubuntu distribution.
 
+WSLg mode disables Qt's extra automatic DPI multiplier and uses a scale of 1.
+This addresses one possible source of oversized windows; Windows/WSLg compositor
+scaling is separate and still needs checking on the affected machine. If needed,
+choose an explicit application scale before launching:
+
+```sh
+STI_GUI_SCALE=0.75 python3 sim.py up --display native
+```
+
+On container-start or sensor-check failures, the launcher prints container logs
+and saves available graphics/application logs under `.sti-diagnostics/startup-*`.
+These files survive a GPU-to-CPU retry. Display mode is recorded before starting,
+so `python3 sim.py logs` and `python3 sim.py down` also work after a failed start.
+Both OpenGL verification calls have timeouts. For diagnosis, use strict GPU mode
+and send the final terminal output plus the saved logs.
+
 GPU mode forwards `/dev/dxg` and `/usr/lib/wsl` and uses Mesa's Direct3D 12
 backend. It requires an up-to-date Windows GPU driver supporting WSLg. The
 container uses its own Mesa libraries; no Linux NVIDIA driver or NVIDIA

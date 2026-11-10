@@ -6,8 +6,8 @@ import yaml
 
 
 def main():
-    from initial_pose import configure_initial_pose
-    configure_initial_pose()
+    from initial_pose import configure_robot_description
+    configure_robot_description()
     deadline = time.monotonic() + 180
     while time.monotonic() < deadline:
         try:

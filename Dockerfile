@@ -10,6 +10,23 @@ RUN apt-get update \
       | xargs -r apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* /tmp/sti-apt-packages.txt
 
+# Ubuntu 22.04's Mesa 23.2 exposes only OpenGL 4.2 through WSL's Direct3D 12
+# driver, and Gazebo's ogre2 renderer aborts without OpenGL 4.3/GL_ARB_copy_image.
+# Kisak's stable Mesa PPA ("turtle"; the faster kisak-mesa PPA dropped 22.04)
+# backports Mesa 25. It serves every graphics path in the image (software,
+# Intel/AMD, WSL), so all machines share one stack. The PPA keeps only its latest
+# release; the version check catches it disappearing or regressing.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends software-properties-common gpg-agent \
+    && add-apt-repository -y ppa:kisak/turtle \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+      libgl1-mesa-dri libglx-mesa0 libegl-mesa0 libgbm1 \
+    && mesa="$(dpkg-query -W -f='${Version}' libgl1-mesa-dri)" \
+    && echo "Mesa $mesa" \
+    && dpkg --compare-versions "$mesa" ge 25 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Upstream release asset, pinned and checked independently of apt packages.
 RUN curl -fL --retry 3 \
     https://github.com/VirtualGL/virtualgl/releases/download/3.1.5/virtualgl_3.1.5_amd64.deb \
@@ -33,7 +50,8 @@ RUN chmod +x /opt/sti/scripts/*.sh \
     && ros2 launch /opt/sti/scripts/hospital.launch.py --show-args \
     && python3 /opt/sti/scripts/validate_world.py
 ENV DISPLAY=:1 QT_X11_NO_MITSHM=1 QT_LOGGING_RULES="qt.qpa.*=false" \
-    ROS_LOCALHOST_ONLY=1 ROS_DOMAIN_ID=42 \
+    ROS_LOCALHOST_ONLY=1 ROS_DOMAIN_ID=42 RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
+    CYCLONEDDS_URI=file:///opt/sti/config/cyclonedds.xml \
     STI_RENDER_MODE=auto STI_EGL_DEVICE=egl0 STI_SCENE=hospital \
     DESKTOP_SIZE=1280x800 NVIDIA_DRIVER_CAPABILITIES=graphics,utility,display
 USER student

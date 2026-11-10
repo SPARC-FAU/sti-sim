@@ -11,6 +11,8 @@ ros-humble-gz-ros2-control
 ros-humble-ros2-control
 ros-humble-ros2-controllers
 ros-humble-teleop-twist-keyboard
+# Cyclone DDS middleware (selected in the Dockerfile; see README)
+ros-humble-rmw-cyclonedds-cpp
 
 # Libraries for student navigation, manipulation and perception code
 ros-humble-navigation2

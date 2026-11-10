@@ -30,25 +30,33 @@ if [[ "${STI_WSL_GPU:-0}" == 1 ]]; then
 fi
 mode=cpu
 if [[ "$STI_RENDER_MODE" != cpu ]]; then
-  probe=(/opt/VirtualGL/bin/vglrun -d "$STI_EGL_DEVICE" -c proxy glxinfo -B)
-  if [[ "${STI_DISPLAY:-browser}" == native ]]; then probe=(glxinfo -B); fi
-  if [[ "${STI_WSL_GPU:-0}" == 1 ]]; then probe=(env GALLIUM_DRIVER=d3d12 glxinfo -B); fi
+  # Full glxinfo output: the capability check needs the extension list.
+  probe=(/opt/VirtualGL/bin/vglrun -d "$STI_EGL_DEVICE" -c proxy glxinfo)
+  if [[ "${STI_DISPLAY:-browser}" == native ]]; then probe=(glxinfo); fi
+  if [[ "${STI_WSL_GPU:-0}" == 1 ]]; then probe=(env GALLIUM_DRIVER=d3d12 glxinfo); fi
+  # A hardware renderer must also support what Gazebo needs; an accelerated
+  # driver that later aborts Gazebo is worse than CPU rendering.
   if timeout 15 "${probe[@]}" > /tmp/sti/gpu-probe.log 2>&1 \
-      && ! grep -Eqi 'llvmpipe|softpipe|lavapipe|software rasterizer|Microsoft Basic Render' /tmp/sti/gpu-probe.log \
-      && grep -q 'OpenGL renderer string:' /tmp/sti/gpu-probe.log; then
+      && python3 /opt/sti/scripts/gl_requirements.py --hardware /tmp/sti/gpu-probe.log > /tmp/sti/gpu-check.log 2>&1; then
     mode=gpu
-  elif [[ "$STI_RENDER_MODE" == gpu ]]; then
-    cat /tmp/sti/gpu-probe.log
-    echo 'GPU required, but no accelerated GLX context was established.'
-    exit 1
   else
-    echo 'GPU context unavailable; selecting CPU rendering. See /tmp/sti/gpu-probe.log.'
+    [[ -s /tmp/sti/gpu-check.log ]] || echo 'no accelerated GLX context was established' > /tmp/sti/gpu-check.log
+    if [[ "$STI_RENDER_MODE" == gpu ]]; then
+      echo "GPU required, but it cannot run Gazebo: $(cat /tmp/sti/gpu-check.log). See /tmp/sti/gpu-probe.log."
+      exit 1
+    fi
+    echo "GPU not usable ($(cat /tmp/sti/gpu-check.log)); selecting CPU rendering."
   fi
 fi
 printf '%s\n' "$mode" > /tmp/sti/render-mode
-if ! timeout 20 /opt/sti/scripts/render.sh glxinfo -B > /tmp/sti/renderer.log 2>&1; then
+if ! timeout 20 /opt/sti/scripts/render.sh glxinfo -B > /tmp/sti/renderer.log 2>&1 \
+    || ! timeout 20 /opt/sti/scripts/render.sh glxinfo > /tmp/sti/renderer-full.log 2>&1; then
   cat /tmp/sti/renderer.log
   echo "Renderer verification failed or timed out (selected mode: $mode)."
+  exit 1
+fi
+if ! python3 /opt/sti/scripts/gl_requirements.py /tmp/sti/renderer-full.log > /tmp/sti/renderer-check.log 2>&1; then
+  echo "Selected renderer cannot run Gazebo: $(cat /tmp/sti/renderer-check.log)"
   exit 1
 fi
 echo "STI rendering: $mode"

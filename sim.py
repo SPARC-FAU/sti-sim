@@ -152,8 +152,25 @@ def wait_ready(command, env):
     run(command + ['up', '-d', '--wait', '--wait-timeout', '180'], env)
 
 
+GRAPHICS_FAILURE = 'STI graphics failure'
+
+
+def graphics_failure(directory):
+    """Return the container's graphics-failure explanation from saved logs, if any."""
+    path = directory / 'demo.err'
+    if not path.exists():
+        return None
+    for line in path.read_text(errors='replace').splitlines():
+        if line.startswith(GRAPHICS_FAILURE):
+            return line
+    return None
+
+
 def collect_diagnostics(command, env):
-    """Keep the failing container's logs, including after its entrypoint exits."""
+    """Keep the failing container's logs, including after its entrypoint exits.
+
+    Returns the recorded graphics-failure explanation, or None.
+    """
     try:
         print('Startup failed. Container status and logs:', flush=True)
         subprocess.run(command + ['ps', '-a'], cwd=ROOT, env=env, timeout=15)
@@ -163,8 +180,9 @@ def collect_diagnostics(command, env):
         destination = Path(tempfile.mkdtemp(prefix='startup-', dir=directory))
         # Compose cp works on stopped containers, unlike exec. Copy individual
         # logs to avoid runtime sockets and keep graphics errors after fallback.
-        for name in ('display-probe.log', 'gpu-probe.log', 'renderer.log',
-                     'gazebo.log', 'demo.err', 'supervisor.log'):
+        for name in ('display-probe.log', 'gpu-probe.log', 'gpu-check.log', 'renderer.log',
+                     'renderer-check.log', 'gazebo.log', 'gazebo-gui.log', 'rviz.log',
+                     'demo.err', 'supervisor.log'):
             subprocess.run(command + ['cp', 'sim:/tmp/sti/' + name, str(destination / name)],
                            cwd=ROOT, env=env, capture_output=True, text=True, timeout=10)
         print('Diagnostic files: ' + str(destination), flush=True)
@@ -173,9 +191,15 @@ def collect_diagnostics(command, env):
             if path.exists():
                 print('--- ' + name + ' (last 60 lines) ---', flush=True)
                 print('\n'.join(path.read_text(errors='replace').splitlines()[-60:]), flush=True)
+        failure = graphics_failure(destination)
+        if failure:
+            # Repeat the cause last, where it isn't buried under log output.
+            print('\n' + failure, flush=True)
+        return failure
     except (OSError, subprocess.TimeoutExpired) as exc:
         # Reporting must not replace the original startup error.
         print('Could not save all diagnostics: ' + str(exc), flush=True)
+    return None
 
 
 def main():
@@ -215,36 +239,35 @@ def main():
         elif args.command == 'up':
             # Build independently of GPU runtime availability.
             run(compose('cpu') + ['build'], env)
-            print(f'Starting {scene}: display={display}, backend={backend}, mode={mode}', flush=True)
-            write_state({'backend': backend, 'mode': mode, 'scene': scene, 'display': display})
-            try:
-                wait_ready(command, env)
-            except subprocess.CalledProcessError:
-                collect_diagnostics(command, env)
-                if mode != 'auto' or backend == 'cpu':
-                    raise
-                print('GPU startup failed. Saving logs, then retrying with CPU rendering.', flush=True)
-                run(command + ['down'], env)
-                backend, mode = 'cpu', 'cpu'
-                env = environment(mode, backend)
-                env['STI_SCENE'] = scene
-                env.update(display_environment(display))
-                command = compose(backend, display)
+            while True:
+                print(f'Starting {scene}: display={display}, backend={backend}, mode={mode}', flush=True)
                 write_state({'backend': backend, 'mode': mode, 'scene': scene, 'display': display})
+                started = False
                 try:
                     wait_ready(command, env)
+                    started = True
+                    # Do not mask missing sensor data as a successful start.
+                    run(command + ['exec', '-T', 'sim', 'bash', '-lc',
+                                   'source /opt/ros/humble/setup.bash && python3 /opt/sti/scripts/check.py'], env)
+                    run(command + ['exec', '-T', 'sim', 'cat', '/tmp/sti/renderer.log'], env)
+                    break
                 except subprocess.CalledProcessError:
-                    collect_diagnostics(command, env)
-                    raise
+                    failure = collect_diagnostics(command, env)
+                    # In auto mode, a GPU that fails to start or crashes the
+                    # simulator falls back to CPU. Other application or sensor
+                    # failures are reported rather than hidden by a restart.
+                    gpu_crash = bool(failure) and failure.startswith(GRAPHICS_FAILURE + ' (gpu)')
+                    if mode != 'auto' or backend == 'cpu' or (started and not gpu_crash):
+                        raise
+                    reason = 'crashed the simulator' if started else 'startup failed'
+                    print(f'GPU rendering {reason}. Logs saved; retrying with CPU rendering.', flush=True)
+                    run(command + ['down'], env)
+                    backend, mode = 'cpu', 'cpu'
+                    env = environment(mode, backend)
+                    env['STI_SCENE'] = scene
+                    env.update(display_environment(display))
+                    command = compose(backend, display)
             write_state({'backend': backend, 'mode': mode, 'scene': scene, 'display': display})
-            # Do not mask missing sensor data as a successful start.
-            try:
-                run(command + ['exec', '-T', 'sim', 'bash', '-lc',
-                               'source /opt/ros/humble/setup.bash && python3 /opt/sti/scripts/check.py'], env)
-                run(command + ['exec', '-T', 'sim', 'cat', '/tmp/sti/renderer.log'], env)
-            except subprocess.CalledProcessError:
-                collect_diagnostics(command, env)
-                raise
             if display == 'native':
                 print('Gazebo and RViz open as windows on your desktop.')
             else:

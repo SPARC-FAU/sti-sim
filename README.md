@@ -14,7 +14,9 @@ conversion and launcher tests can run without Docker. The updated amd64 image
 passes dependency imports, C++17 ROS compilation, launch-description loading and
 the hospital physics smoke test. Representative GUI/GPU and student-workflow
 acceptance runs are still needed before distributing it as the tested course image.
-PAL controllers are launched, but autonomous navigation and MoveIt are not started.
+PAL's arm, torso, head and gripper controllers are launched; the omni base is
+driven by Gazebo systems on PAL's topic names (see Hospital and TIAGo Pro).
+Autonomous navigation and MoveIt are not started.
 
 ## Course foundation and student work
 
@@ -159,19 +161,28 @@ GPU mode forwards `/dev/dxg` and `/usr/lib/wsl` and uses Mesa's Direct3D 12
 backend. It requires an up-to-date Windows GPU driver supporting WSLg. The
 container uses its own Mesa libraries; no Linux NVIDIA driver or NVIDIA
 Container Toolkit is required for this Direct3D display path. Startup probes the
-actual OpenGL renderer, rejecting software renderers. In `auto`, missing host
-GPU resources select CPU immediately, and a failed GPU container start retries
-without GPU mounts. `--mode gpu` reports failure instead of accepting software
-rendering. An application/sensor failure after startup remains a reported failure.
+actual OpenGL renderer and rejects software renderers and drivers below Gazebo's
+requirement (see Rendering and fallback). In `auto`, missing host GPU resources
+select CPU immediately, and a failed GPU container start or a recognised GPU crash
+of Gazebo/RViz retries without GPU mounts. `--mode gpu` reports failure instead of
+accepting software rendering. Other application/sensor failures remain reported
+failures.
 
 Look for `STI rendering: gpu` and an `OpenGL renderer string` naming D3D12 and
 your GPU. `llvmpipe` means CPU rendering. Integrated/discrete GPU selection follows
 Mesa's defaults; optionally set `MESA_D3D12_DEFAULT_ADAPTER_NAME` in the Compose
 GPU overlay to a substring of the desired adapter name.
 
-The forwarding, selection and fallback logic have local test coverage. Actual
-GPU rendering still needs a Windows acceptance run; this Linux host cannot
-validate a WSL GPU. macOS continues to use browser display.
+Ubuntu 22.04's own Mesa (23.2) gives WSL's Direct3D 12 driver only OpenGL 4.2,
+which makes Gazebo abort a few seconds after its window appears; the image
+therefore installs current Mesa (see Rendering and fallback). Tested on WSLg with
+an NVIDIA RTX 3080 (Mesa 25.0.7, OpenGL 4.6, Cyclone DDS). There, 16 of 16 fresh
+`auto` starts selected the GPU and passed the sensor check in 13–17 s, with no
+CPU retries. `check --motion` passed on GPU and in forced CPU mode, and browser
+mode started on CPU and passed. Intermittent startup stalls seen during that testing
+were traced to the ROS middleware, not graphics (see ROS middleware). Other Windows
+GPUs and drivers are unverified; ones below Gazebo's requirement fall back to
+CPU. macOS continues to use browser display.
 
 See [Microsoft's WSLg container guide](https://github.com/microsoft/wslg/blob/main/samples/container/Containers.md)
 for the underlying display and GPU forwarding mechanisms.
@@ -271,7 +282,17 @@ disabled initially to limit rendering load. Key topics are:
 | `/scan_front_raw`, `/scan_rear_raw` | Gazebo lidar bridge |
 | `/head_front_camera/color/image_raw` | Gazebo RGB camera bridge |
 | `/head_front_camera/depth/color/points` | Gazebo depth point-cloud bridge |
-| `/mobile_base_controller/odom` | PAL base controller |
+| `/mobile_base_controller/odom`, `odom` → `base_footprint` TF | Gazebo odometry publisher (ground truth) |
+| `/mobile_base_controller/cmd_vel_unstamped` | Base velocity input (x, y, yaw) |
+
+The base matches PAL's public simulation approach rather than its robot software.
+PAL's `omni_drive_controller` isn't publicly released for Humble. PAL's public
+Gazebo Classic simulation moves the base with a planar-move plugin instead, and
+this image uses the Fortress equivalents (`VelocityControl` and
+`OdometryPublisher`, added to the robot description before spawning). The base
+moves holonomically as commanded; wheel slip and mecanum rollers are not
+simulated, and odometry is exact. Add noise yourself if your localisation work
+needs realistic odometry.
 
 For keyboard driving, inside the container use:
 
@@ -280,8 +301,29 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args \
   -r cmd_vel:=/mobile_base_controller/cmd_vel_unstamped
 ```
 
-The motion check uses this same controller input directly, bypassing the optional
+The motion check uses this same base input directly, bypassing the optional
 navigation/teleop multiplexer. Check the area ahead is clear before moving.
+
+## ROS middleware
+
+The image uses Cyclone DDS (`RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`) instead of
+Humble's default Fast DDS. On Fast DDS 2.6 / `rmw_fastrtps` 6.2, a service server
+drops its reply if it hasn't yet discovered a brand-new client
+(`failed to send response ... client will not receive response`). At startup,
+Gazebo's `gz_ros2_control` plugin asks `robot_state_publisher` for the robot
+description this way, waits for the reply without a timeout, and blocks
+Gazebo's simulation thread. In testing, about 25 GPU startups on Fast DDS
+froze twice this way: one confirmed by a stack trace, one with the same symptoms. The race doesn't involve rendering, so CPU and native Linux are
+exposed too. Nav2 and MoveIt also recommend Cyclone DDS for Humble. Every
+ROS process in the container, including student nodes, uses the same
+middleware. `ROS_LOCALHOST_ONLY=1` and `ROS_DOMAIN_ID=42` still apply.
+
+Loopback has no multicast inside Docker, so Cyclone discovers participants by
+unicast. Its default participant limit is too low for the launch: in testing,
+only 7 of 25 simultaneously started nodes initialised (`failed to create
+domain`), and none were discoverable. `config/cyclonedds.xml` (selected with
+`CYCLONEDDS_URI`) raises the limit to 120 participants and lists localhost as
+the unicast peer; with it, 25 of 25 nodes started and discovered each other.
 
 ## Rendering and fallback
 
@@ -289,16 +331,36 @@ Applications draw into an Xvfb desktop. VirtualGL redirects their OpenGL work to
 an EGL GPU and copies rendered frames into that desktop. x11vnc and noVNC deliver
 the desktop to the browser. CPU mode uses Mesa software OpenGL instead.
 
-`auto` first chooses host device mappings, then probes the real GLX context in
-the desktop. An unavailable/software GPU context falls back to CPU. If a mapped
-GPU prevents the container from becoming healthy, the launcher prints logs and
-recreates it once without GPU mappings. `--mode gpu` never silently falls back.
+Every graphics path uses one Mesa build: Ubuntu 22.04's Mesa is replaced from
+kisak's stable Mesa PPA ([`ppa:kisak/turtle`](https://launchpad.net/~kisak/+archive/ubuntu/turtle))
+during the image build, which fails if it doesn't receive Mesa 25 or newer.
+That PPA keeps only its latest release, so rebuilding can change the Mesa version.
+A distributed prebuilt image avoids that.
 
-The live sensor check is a separate gate: missing images, lidar, clock or TF fail
-startup with an error. It does not treat an arbitrary ROS/world error as proof
-that GPU rendering failed. A failed sensor check leaves the container available
-for diagnosis. To retry deliberately, run `python3 sim.py up --mode cpu`.
-No automatic renderer changes occur during a running student session.
+`auto` first chooses host device mappings, then probes the real GLX context in
+the desktop. The context must be hardware-accelerated and meet Gazebo's renderer
+requirement: OpenGL 4.3, or `GL_ARB_copy_image`
+(`scripts/gl_requirements.py`). A GPU that is missing, software-only or below
+that requirement falls back to CPU; Mesa's software renderer meets it. If a
+mapped GPU prevents the container from becoming healthy, the launcher prints logs
+and recreates it once without GPU mappings. `--mode gpu` never silently falls back.
+
+Gazebo's server and GUI run as separate processes. In Fortress's combined mode
+the server waits for the GUI to hand over the world, so a GUI stuck in driver
+initialisation would also stop physics, sensors and robot spawning.
+
+The live sensor check is a separate gate: missing images, lidar, clock, odometry
+or TF fail startup with an error. The check stops early if the simulation has
+already exited, if no simulation time arrives within 90 s, or if simulation time
+stops advancing for 30 s (a frozen simulator, or a paused world when running
+`sim.py check` by hand). A frozen clock isn't treated as a graphics failure. When Gazebo or RViz exits, `scripts/diagnose_render.py` looks for
+known graphics-driver failures and writes a one-line `STI graphics failure`
+explanation to `demo.err`. The launcher repeats that line last. In `auto`, a
+graphics failure on GPU recreates the container once on CPU. Other failures,
+including CPU graphics failures, are reported rather than retried, and the
+container stays available for diagnosis. To retry deliberately, run
+`python3 sim.py up --mode cpu`. No automatic renderer changes occur during a
+running student session.
 
 The container's Docker health check tests desktop and process liveness, not sensor
 validity. `sim.py check` is the data-path acceptance check. Visual correctness of
@@ -316,8 +378,10 @@ Inside the container, logs are in `/tmp/sti`:
 | File | Purpose |
 | --- | --- |
 | `render-mode`, `renderer.log` | Selected mode and OpenGL identity |
-| `gpu-probe.log` | GPU probe, including failure reason |
-| `gazebo.log` | Hospital: combined Gazebo, PAL, spawn, bridge and RViz output |
+| `gpu-probe.log`, `gpu-check.log` | GPU probe output and the capability verdict |
+| `renderer-check.log` | Capability verdict for the renderer actually selected |
+| `gazebo.log` | Hospital: combined Gazebo server/GUI, PAL, spawn, bridge and RViz output; demo: Gazebo server |
+| `gazebo-gui.log` | Demo: Gazebo GUI |
 | `bridge.log`, `rviz.log` | Separate bridge/RViz logs for the small demo |
 | `demo.err`, `supervisor.log` | Application lifecycle |
 

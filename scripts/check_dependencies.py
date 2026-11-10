@@ -23,6 +23,7 @@ def main():
         'slam_toolbox', 'moveit_ros_move_group', 'moveit_ros_planning_interface',
         'moveit_task_constructor_core', 'moveit_task_constructor_visualization',
         'tiago_pro_moveit_config', 'ros2_control', 'ros2_controllers', 'xacro',
+        'rmw_cyclonedds_cpp',
     )
     for package in packages:
         get_package_prefix(package)

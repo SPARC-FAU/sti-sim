@@ -13,8 +13,8 @@ spec.loader.exec_module(sim)
 
 class BackendSelection(unittest.TestCase):
     def setUp(self):
-        diagnostics = patch.object(sim, 'collect_diagnostics')
-        diagnostics.start()
+        diagnostics = patch.object(sim, 'collect_diagnostics', return_value=None)
+        self.diagnostics = diagnostics.start()
         self.addCleanup(diagnostics.stop)
         access = patch.object(sim, 'check_docker_access')
         access.start()
@@ -135,6 +135,46 @@ class BackendSelection(unittest.TestCase):
         self.assertEqual(len([c for c in calls if 'up' in c]), 1)
         self.assertFalse(any('down' in c for c in calls))
 
+    def check_failure_run(self, failure, argv=('sim.py', 'up')):
+        """Fail the first sensor check with the given diagnosis; return compose calls."""
+        calls = []
+        self.diagnostics.side_effect = [failure, None]
+
+        def run(command, env):
+            calls.append(command)
+            if 'exec' in command and len([c for c in calls if 'up' in c]) == 1:
+                raise sim.subprocess.CalledProcessError(1, command)
+
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(sim, 'ROOT', Path(tmp)), \
+             patch.object(sim, 'STATE', Path(tmp)/'state.json'), \
+             patch.object(sim.shutil, 'which', return_value='/bin/docker'), \
+             patch.object(sim, 'choose_backend', return_value='nvidia'), \
+             patch.object(sim, 'run', side_effect=run), \
+             patch.object(sim.sys, 'argv', list(argv)):
+            try:
+                sim.main()
+            except SystemExit:
+                calls.append('exit')
+        return calls
+
+    def test_gpu_graphics_crash_after_start_retries_on_cpu(self):
+        calls = self.check_failure_run('STI graphics failure (gpu): driver lacks a feature. Retry')
+        starts = [c for c in calls if 'up' in c]
+        self.assertEqual(len(starts), 2)
+        self.assertFalse(any('compose.nvidia.yaml' in part for part in starts[1]))
+        self.assertNotIn('exit', calls)
+
+    def test_cpu_graphics_crash_is_reported_not_retried(self):
+        calls = self.check_failure_run('STI graphics failure (cpu): no context. Send logs')
+        self.assertEqual(len([c for c in calls if 'up' in c]), 1)
+        self.assertIn('exit', calls)
+
+    def test_strict_gpu_graphics_crash_is_reported_not_retried(self):
+        calls = self.check_failure_run('STI graphics failure (gpu): x', ('sim.py', 'up', '--mode', 'gpu'))
+        self.assertEqual(len([c for c in calls if 'up' in c]), 1)
+        self.assertIn('exit', calls)
+
     def test_state_replaces_an_unwritable_previous_file(self):
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(sim, 'ROOT', Path(tmp)), \
@@ -190,6 +230,20 @@ class FailureDiagnostics(unittest.TestCase):
         self.assertTrue(any('logs' in command for command in calls))
         self.assertFalse(any('exec' in command for command in calls))
 
+    def test_graphics_failure_is_returned_from_saved_logs(self):
+        failure = 'STI graphics failure (gpu): the OpenGL driver lacks a feature. Retry with: x'
+
+        def run(command, **kwargs):
+            if 'cp' in command and command[-1].endswith('demo.err'):
+                Path(command[-1]).write_text('Hospital launch stopped unexpectedly\n' + failure + '\n')
+            return sim.subprocess.CompletedProcess(command, 0)
+
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(sim, 'ROOT', Path(tmp)), \
+             patch.object(sim.subprocess, 'run', side_effect=run), \
+             patch('builtins.print'):
+            self.assertEqual(sim.collect_diagnostics(['docker', 'compose'], {}), failure)
+
     def test_failed_diagnostics_do_not_raise_another_error(self):
         with patch.object(sim.subprocess, 'run', side_effect=OSError('Docker unavailable')), \
              patch('builtins.print'):
@@ -198,7 +252,8 @@ class FailureDiagnostics(unittest.TestCase):
 
 class NativeDisplay(unittest.TestCase):
     def test_native_and_gpu_overrides_are_combined(self):
-        command = sim.compose('dri', 'native')
+        with patch.object(sim, 'is_wsl', return_value=False):
+            command = sim.compose('dri', 'native')
         self.assertIn(str(ROOT/'compose.dri.yaml'), command)
         self.assertIn(str(ROOT/'compose.native.yaml'), command)
 

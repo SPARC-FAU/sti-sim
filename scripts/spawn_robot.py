@@ -8,7 +8,7 @@ import yaml
 STALLED = Path('/tmp/sti/startup-stalled')
 
 
-def controllers_started(timeout=40):
+def controllers_started(timeout=20):
     """Whether Gazebo's ros2_control plugin came up after the robot was created.
 
     The plugin fetches the robot description with a ROS service call and waits
@@ -30,8 +30,8 @@ def controllers_started(timeout=40):
 
 
 def main():
-    from initial_pose import configure_initial_pose
-    configure_initial_pose()
+    from initial_pose import configure_robot_description
+    configure_robot_description()
     deadline = time.monotonic() + 180
     while time.monotonic() < deadline:
         try:

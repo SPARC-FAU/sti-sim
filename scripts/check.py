@@ -6,6 +6,7 @@ Uses wall time so a missing /clock cannot hang the test.
 import argparse
 import math
 import os
+import subprocess
 import time
 
 import rclpy
@@ -15,6 +16,39 @@ from rclpy.qos import qos_profile_sensor_data
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import Image, JointState, LaserScan
 from tf2_ros import Buffer, TransformListener
+
+
+def simulation_exited():
+    """True only when supervisord positively reports the simulation as stopped."""
+    if not os.path.exists('/tmp/sti/supervisor.sock'):
+        return False  # Not running under the image's supervisor; can't tell.
+    try:
+        result = subprocess.run(['supervisorctl', '-c', '/opt/sti/config/supervisord.conf', 'status', 'demo'],
+                                capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    fields = result.stdout.split()
+    return len(fields) > 1 and fields[0] == 'demo' and fields[1] in ('EXITED', 'FATAL', 'STOPPED', 'BACKOFF')
+
+
+# Longer than demo.sh needs to notice a frozen start-up and restart the launch.
+STALL_SECONDS = 60
+FIRST_CLOCK_SECONDS = 90
+# Seen when a ROS service reply was lost, leaving gz_ros2_control (which runs in
+# Gazebo's simulation thread) waiting forever for the robot description.
+LOST_REPLY = 'client will not receive response'
+
+
+def stall_cause():
+    """Name a known cause of a frozen simulation from the launch log, if present."""
+    try:
+        with open('/tmp/sti/gazebo.log', errors='replace') as stream:
+            if LOST_REPLY in stream.read():
+                return ('a ROS service reply was lost while Gazebo loaded the robot '
+                        '(gz_ros2_control waits for it indefinitely). Restart the simulation')
+    except OSError:
+        pass
+    return 'paused or stalled. Inspect /tmp/sti/gazebo.log'
 
 
 def main():
@@ -32,10 +66,14 @@ def main():
     positions = []
     scan_frames = set()
     failures = []
+    progress = {'sim': None, 'wall': time.monotonic()}
 
     def clock(msg):
         if msg.clock.sec or msg.clock.nanosec:
             counts['clock'] += 1
+            value = (msg.clock.sec, msg.clock.nanosec)
+            if value != progress['sim']:
+                progress.update(sim=value, wall=time.monotonic())
 
     def scan(msg):
         if any(math.isfinite(x) and msg.range_min < x < msg.range_max for x in msg.ranges):
@@ -82,10 +120,25 @@ def main():
         return bool(scan_frames) and all(buffer.can_transform(frame, sensor, rclpy.time.Time()) for sensor in scan_frames)
     try:
         deadline = time.monotonic() + args.timeout
+        next_liveness = time.monotonic() + 2
         while time.monotonic() < deadline:
             rclpy.spin_once(node, timeout_sec=0.1)
             if min(counts.values()) >= 3 and has_lidar_transform():
                 break
+            # Don't wait minutes for sensors from a simulation that already exited.
+            if time.monotonic() >= next_liveness:
+                next_liveness = time.monotonic() + 2
+                if simulation_exited():
+                    raise SystemExit('FAIL: the simulation exited during startup. '
+                                     'Inspect /tmp/sti/demo.err and /tmp/sti/gazebo.log')
+                # Physics runs at 1 kHz, so frozen simulation time means a blocked
+                # simulator rather than a slow sensor.
+                waited = time.monotonic() - progress['wall']
+                if progress['sim'] is None and waited > FIRST_CLOCK_SECONDS:
+                    raise SystemExit(f'FAIL: no simulation time after {FIRST_CLOCK_SECONDS} s: {stall_cause()}')
+                if progress['sim'] is not None and waited > STALL_SECONDS:
+                    raise SystemExit(f'FAIL: simulation time stopped advancing for {STALL_SECONDS} s: '
+                                     f'{stall_cause()}')
         failures.extend(name for name, count in counts.items() if count < 3)
         if not has_lidar_transform():
             failures.append('lidar transform')

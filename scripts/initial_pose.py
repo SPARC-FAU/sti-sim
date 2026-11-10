@@ -1,4 +1,4 @@
-"""Prepare the simulated TIAGo's description before creation: PAL home pose and base drive."""
+"""Seed the simulated TIAGo with the installed PAL home pose before creation."""
 import json
 import math
 from pathlib import Path
@@ -7,7 +7,6 @@ import xml.etree.ElementTree as ET
 import yaml
 
 MOTION_FILE = 'tiago_pro_motions_general_spherical-wrist.yaml'
-BASE_TOPIC = '/mobile_base_controller'
 
 
 def home_positions(motions):
@@ -49,37 +48,51 @@ def seed_description(description, positions):
     return ET.tostring(robot, encoding='unicode')
 
 
-def add_base_drive(description):
-    """Make the base drivable and report odometry on PAL's topic names.
+VELOCITY_CONTROL = 'ignition::gazebo::systems::VelocityControl'
+ODOMETRY_PUBLISHER = 'ignition::gazebo::systems::OdometryPublisher'
+PLANAR_BASE = (
+    ('ignition-gazebo-velocity-control-system', VELOCITY_CONTROL,
+     (('topic', '/mobile_base_controller/cmd_vel_unstamped'),)),
+    ('ignition-gazebo-odometry-publisher-system', ODOMETRY_PUBLISHER,
+     (('odom_frame', 'odom'), ('robot_base_frame', 'base_footprint'),
+      ('odom_topic', '/mobile_base_controller/odom'), ('tf_topic', '/mobile_base_controller/tf'),
+      ('odom_publish_frequency', '50'), ('dimensions', '2'))),
+)
 
-    PAL's omni_drive_controller is not part of the public ROS packages, so no
-    ros2_control controller can drive the base. As PAL's public Gazebo Classic
-    simulation does with its planar-move plugin, the base is moved as a whole:
-    Gazebo applies the commanded body velocity and reports odometry. Like that
-    plugin, it keeps the last command until a new one (or zero) arrives.
+
+def add_planar_base(description):
+    """Drive the omni base like PAL's public simulation does.
+
+    PAL's mobile_base_controller type (omni_drive_controller) isn't publicly
+    released for Humble. PAL's public Classic simulation instead moves the base
+    with a planar-move plugin on the same ROS topics; these are the Fortress
+    equivalents. Commands on /mobile_base_controller/cmd_vel_unstamped
+    (x, y, yaw) move the robot and ground-truth odometry is published on
+    /mobile_base_controller/odom with the odom -> base_footprint transform.
+    Wheels don't model mecanum rollers.
     """
     robot = ET.fromstring(description)
-    gazebo = ET.SubElement(robot, 'gazebo')
-    control = ET.SubElement(gazebo, 'plugin', {
-        'filename': 'ignition-gazebo-velocity-control-system',
-        'name': 'ignition::gazebo::systems::VelocityControl'})
-    ET.SubElement(control, 'topic').text = BASE_TOPIC + '/cmd_vel_unstamped'
-    odometry = ET.SubElement(gazebo, 'plugin', {
-        'filename': 'ignition-gazebo-odometry-publisher-system',
-        'name': 'ignition::gazebo::systems::OdometryPublisher'})
-    for name, value in (('odom_topic', BASE_TOPIC + '/odom'), ('tf_topic', BASE_TOPIC + '/odom_tf'),
-                        ('odom_frame', 'odom'), ('robot_base_frame', 'base_footprint'),
-                        ('odom_publish_frequency', '50'), ('dimensions', '2')):
-        ET.SubElement(odometry, name).text = value
+    present = {plugin.get('name') for plugin in robot.findall('gazebo/plugin')}
+    gazebo = None
+    for filename, name, parameters in PLANAR_BASE:
+        if name in present:
+            continue
+        if gazebo is None:
+            gazebo = ET.SubElement(robot, 'gazebo')
+        plugin = ET.SubElement(gazebo, 'plugin', filename=filename, name=name)
+        for key, value in parameters:
+            ET.SubElement(plugin, key).text = value
     return ET.tostring(robot, encoding='unicode')
 
 
-def configure_initial_pose():
+def configure_robot_description():
     """Update RSP's parameter and wait for its latched topic before spawning.
 
     Gazebo's controller plugin reads the same description from RSP, so physical
     joint state and controller state both start folded. No motion action or
-    MoveIt server is needed, and no installed PAL package is modified.
+    MoveIt server is needed, and no installed PAL package is modified. The
+    simulated base systems are added to the same description, so the spawned
+    model and /robot_description stay identical.
     """
     import time
     from ament_index_python.packages import get_package_share_directory
@@ -90,10 +103,11 @@ def configure_initial_pose():
     from std_msgs.msg import String
 
     config = yaml.safe_load(Path('/opt/sti/config/hospital.yaml').read_text())
-    positions = {}
-    if config.get('initial_pose', 'home') is not None:
-        if config.get('initial_pose', 'home') != 'home':
-            raise ValueError('Supported initial_pose values: home or null')
+    setting = config.get('initial_pose', 'home')
+    if setting not in ('home', None):
+        raise ValueError('Supported initial_pose values: home or null')
+    positions = None
+    if setting == 'home':
         path = Path(get_package_share_directory('tiago_pro_bringup'))/'config/motions'/MOTION_FILE
         positions = home_positions(yaml.safe_load(path.read_text()))
     rclpy.init()
@@ -125,21 +139,26 @@ def configure_initial_pose():
         response = call(GetParameters, 'get_parameters', request)
         if len(response.values) != 1 or not response.values[0].string_value:
             raise RuntimeError('Robot state publisher returned an empty description')
-        description = add_base_drive(seed_description(response.values[0].string_value, positions))
+        description = response.values[0].string_value
+        if positions is not None:
+            description = seed_description(description, positions)
+        description = add_planar_base(description)
         request = SetParameters.Request()
         request.parameters = [Parameter('robot_description', value=description).to_parameter_msg()]
         response = call(SetParameters, 'set_parameters', request)
         if len(response.results) != 1 or not response.results[0].successful:
-            raise RuntimeError('Robot state publisher rejected the prepared description')
+            raise RuntimeError('Robot state publisher rejected the seeded initial pose')
         # Parameter-event handling republishes asynchronously. Wait for the exact
         # updated description, otherwise the spawner could latch the old one.
         deadline = time.monotonic() + 20
         while latest != [description]:
             if time.monotonic() >= deadline:
-                raise RuntimeError('Prepared robot description was not republished before spawn')
+                raise RuntimeError('Seeded robot description was not republished before spawn')
             rclpy.spin_once(node, timeout_sec=0.1)
-        Path('/tmp/sti/initial-pose.json').write_text(json.dumps(positions, indent=2) + '\n')
-        print(f'Robot description prepared: base drive added, {len(positions)} home-pose joints seeded', flush=True)
+        if positions is not None:
+            Path('/tmp/sti/initial-pose.json').write_text(json.dumps(positions, indent=2) + '\n')
+            print(f'Initial pose: PAL home, {len(positions)} joints seeded before spawn', flush=True)
+        print('Base: planar velocity control and ground-truth odometry added before spawn', flush=True)
     finally:
         node.destroy_node()
         rclpy.shutdown()

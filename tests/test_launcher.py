@@ -13,6 +13,9 @@ spec.loader.exec_module(sim)
 
 class BackendSelection(unittest.TestCase):
     def setUp(self):
+        diagnostics = patch.object(sim, 'collect_diagnostics', return_value=None)
+        self.diagnostics = diagnostics.start()
+        self.addCleanup(diagnostics.stop)
         access = patch.object(sim, 'check_docker_access')
         access.start()
         self.addCleanup(access.stop)
@@ -28,24 +31,51 @@ class BackendSelection(unittest.TestCase):
         with patch.object(sim.platform, 'system', return_value='Linux'), patch.object(sim, 'is_wsl', return_value=True):
             self.assertEqual(sim.choose_backend('auto', 'auto'), 'cpu')
 
-    def test_wsl2_docker_daemon_selects_d3d12_backend_from_windows_or_wsl(self):
-        kernel = '6.6.87.2-microsoft-standard-WSL2'
-        for system, wsl in (('Windows', False), ('Linux', True)):
-            with patch.object(sim.platform, 'system', return_value=system), \
-                 patch.object(sim, 'is_wsl', return_value=wsl):
-                self.assertEqual(sim.choose_backend('auto', 'auto', kernel), 'wsl')
+    def test_wslg_gpu_requires_native_display_and_host_resources(self):
+        with patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'is_wsl', return_value=True), \
+             patch.object(sim.Path, 'exists', return_value=True):
+            self.assertEqual(sim.choose_backend('auto', 'auto', 'native'), 'wslgpu')
+            self.assertEqual(sim.choose_backend('auto', 'auto', 'browser'), 'cpu')
+            self.assertEqual(sim.choose_backend('cpu', 'auto', 'native'), 'cpu')
+        with patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'is_wsl', return_value=True), \
+             patch.object(sim.Path, 'exists', return_value=False):
+            self.assertEqual(sim.choose_backend('auto', 'auto', 'native'), 'cpu')
 
-    def test_cpu_mode_overrides_wsl_gpu(self):
-        self.assertEqual(sim.choose_backend('cpu', 'auto', '6.6.87.2-microsoft-standard-WSL2'), 'cpu')
+    def test_wslg_gpu_failure_preserves_native_display_on_cpu_retry(self):
+        calls = []
 
-    def test_docker_desktop_on_mac_stays_cpu(self):
-        with patch.object(sim.platform, 'system', return_value='Darwin'):
-            self.assertEqual(sim.choose_backend('auto', 'auto', '6.12.76-linuxkit'), 'cpu')
+        def run(command, env):
+            calls.append((command, env.copy()))
+            if 'up' in command and any('compose.wslgpu.yaml' in part for part in command):
+                raise sim.subprocess.CalledProcessError(1, command)
 
-    def test_wsl_backend_adds_d3d12_overrides(self):
-        command = sim.compose('wsl')
-        self.assertIn(str(ROOT/'compose.wsl.yaml'), command)
-        self.assertTrue((ROOT/'compose.wsl.yaml').exists())
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(sim, 'ROOT', Path(tmp)), \
+             patch.object(sim, 'STATE', Path(tmp)/'state.json'), \
+             patch.object(sim.shutil, 'which', return_value='/bin/docker'), \
+             patch.object(sim, 'is_wsl', return_value=True), \
+             patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'choose_backend', return_value='wslgpu'), \
+             patch.object(sim.os, 'stat') as stat, \
+             patch.object(sim, 'prepare_workspace', return_value=False), \
+             patch.object(sim.Path, 'is_socket', return_value=True), \
+             patch.dict(sim.os.environ, {'DISPLAY': ':0'}), \
+             patch.object(sim, 'run', side_effect=run), \
+             patch.object(sim.subprocess, 'run'), \
+             patch.object(sim.sys, 'argv', ['sim.py', 'up', '--display', 'native']):
+            stat.return_value.st_gid = 44
+            sim.main()
+            state = sim.json.loads(sim.STATE.read_text())
+        starts = [(cmd, env) for cmd, env in calls if 'up' in cmd]
+        self.assertEqual(len(starts), 2)
+        self.assertTrue(any('compose.wslgpu.yaml' in part for part in starts[0][0]))
+        self.assertFalse(any('compose.wslgpu.yaml' in part for part in starts[1][0]))
+        self.assertTrue(any('compose.wslg.yaml' in part for part in starts[1][0]))
+        self.assertEqual(starts[1][1]['STI_RENDER_MODE'], 'cpu')
+        self.assertEqual(state['display'], 'native')
+        self.assertEqual(state['backend'], 'cpu')
 
     def test_gpu_start_failure_retries_without_device_mapping(self):
         calls = []
@@ -77,6 +107,7 @@ class BackendSelection(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(sim, 'ROOT', Path(tmp)), \
+             patch.object(sim, 'STATE', Path(tmp)/'state.json'), \
              patch.object(sim.shutil, 'which', return_value='/bin/docker'), \
              patch.object(sim, 'choose_backend', return_value='nvidia'), \
              patch.object(sim, 'run', side_effect=run), \
@@ -104,6 +135,46 @@ class BackendSelection(unittest.TestCase):
                 sim.main()
         self.assertEqual(len([c for c in calls if 'up' in c]), 1)
         self.assertFalse(any('down' in c for c in calls))
+
+    def check_failure_run(self, failure, argv=('sim.py', 'up')):
+        """Fail the first sensor check with the given diagnosis; return compose calls."""
+        calls = []
+        self.diagnostics.side_effect = [failure, None]
+
+        def run(command, env):
+            calls.append(command)
+            if 'exec' in command and len([c for c in calls if 'up' in c]) == 1:
+                raise sim.subprocess.CalledProcessError(1, command)
+
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(sim, 'ROOT', Path(tmp)), \
+             patch.object(sim, 'STATE', Path(tmp)/'state.json'), \
+             patch.object(sim.shutil, 'which', return_value='/bin/docker'), \
+             patch.object(sim, 'choose_backend', return_value='nvidia'), \
+             patch.object(sim, 'run', side_effect=run), \
+             patch.object(sim.sys, 'argv', list(argv)):
+            try:
+                sim.main()
+            except SystemExit:
+                calls.append('exit')
+        return calls
+
+    def test_gpu_graphics_crash_after_start_retries_on_cpu(self):
+        calls = self.check_failure_run('STI graphics failure (gpu): driver lacks a feature. Retry')
+        starts = [c for c in calls if 'up' in c]
+        self.assertEqual(len(starts), 2)
+        self.assertFalse(any('compose.nvidia.yaml' in part for part in starts[1]))
+        self.assertNotIn('exit', calls)
+
+    def test_cpu_graphics_crash_is_reported_not_retried(self):
+        calls = self.check_failure_run('STI graphics failure (cpu): no context. Send logs')
+        self.assertEqual(len([c for c in calls if 'up' in c]), 1)
+        self.assertIn('exit', calls)
+
+    def test_strict_gpu_graphics_crash_is_reported_not_retried(self):
+        calls = self.check_failure_run('STI graphics failure (gpu): x', ('sim.py', 'up', '--mode', 'gpu'))
+        self.assertEqual(len([c for c in calls if 'up' in c]), 1)
+        self.assertIn('exit', calls)
 
     def test_state_replaces_an_unwritable_previous_file(self):
         with tempfile.TemporaryDirectory() as tmp, \
@@ -236,11 +307,6 @@ class DockerAccess(unittest.TestCase):
                 sim.check_docker_access()
         self.assertEqual(run.call_args.args[0][0], 'docker')
 
-    def test_access_check_returns_daemon_kernel(self):
-        result = sim.subprocess.CompletedProcess(['docker'], 0, 'linux/x86_64 6.6.87.2-microsoft-standard-WSL2\n', '')
-        with patch.object(sim.subprocess, 'run', return_value=result):
-            self.assertEqual(sim.check_docker_access(), '6.6.87.2-microsoft-standard-WSL2')
-
     def test_daemon_not_running_is_not_reported_as_a_permission_error(self):
         result = sim.subprocess.CompletedProcess(['docker'], 1, '', 'Cannot connect to the Docker daemon')
         with patch.object(sim.subprocess, 'run', return_value=result):
@@ -255,9 +321,52 @@ class DockerAccess(unittest.TestCase):
                 sim.check_docker_access()
 
 
+class FailureDiagnostics(unittest.TestCase):
+    def test_stopped_container_logs_are_copied_before_printing(self):
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append(command)
+            if 'cp' in command:
+                Path(command[-1]).write_text('saved graphics error')
+            return sim.subprocess.CompletedProcess(command, 0)
+
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(sim, 'ROOT', Path(tmp)), \
+             patch.object(sim.subprocess, 'run', side_effect=run), \
+             patch('builtins.print') as output:
+            sim.collect_diagnostics(['docker', 'compose'], {})
+            copies = list((Path(tmp)/'.sti-diagnostics').glob('startup-*/gpu-probe.log'))
+            self.assertEqual(len(copies), 1)
+            self.assertEqual(copies[0].read_text(), 'saved graphics error')
+            self.assertTrue(any('saved graphics error' in str(c) for c in output.call_args_list))
+        self.assertTrue(any('logs' in command for command in calls))
+        self.assertFalse(any('exec' in command for command in calls))
+
+    def test_graphics_failure_is_returned_from_saved_logs(self):
+        failure = 'STI graphics failure (gpu): the OpenGL driver lacks a feature. Retry with: x'
+
+        def run(command, **kwargs):
+            if 'cp' in command and command[-1].endswith('demo.err'):
+                Path(command[-1]).write_text('Hospital launch stopped unexpectedly\n' + failure + '\n')
+            return sim.subprocess.CompletedProcess(command, 0)
+
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(sim, 'ROOT', Path(tmp)), \
+             patch.object(sim.subprocess, 'run', side_effect=run), \
+             patch('builtins.print'):
+            self.assertEqual(sim.collect_diagnostics(['docker', 'compose'], {}), failure)
+
+    def test_failed_diagnostics_do_not_raise_another_error(self):
+        with patch.object(sim.subprocess, 'run', side_effect=OSError('Docker unavailable')), \
+             patch('builtins.print'):
+            sim.collect_diagnostics(['docker', 'compose'], {})
+
+
 class NativeDisplay(unittest.TestCase):
     def test_native_and_gpu_overrides_are_combined(self):
-        command = sim.compose('dri', 'native')
+        with patch.object(sim, 'is_wsl', return_value=False):
+            command = sim.compose('dri', 'native')
         self.assertIn(str(ROOT/'compose.dri.yaml'), command)
         self.assertIn(str(ROOT/'compose.native.yaml'), command)
 
@@ -266,13 +375,39 @@ class NativeDisplay(unittest.TestCase):
             self.assertEqual(sim.display_environment('browser', prepare=True), {})
         run.assert_not_called()
 
-    def test_native_mode_rejects_mac_and_wsl(self):
-        with patch.object(sim.platform, 'system', return_value='Darwin'):
-            with self.assertRaisesRegex(RuntimeError, 'desktop Linux'):
-                sim.display_environment('native')
-        with patch.object(sim.platform, 'system', return_value='Linux'), patch.object(sim, 'is_wsl', return_value=True):
-            with self.assertRaisesRegex(RuntimeError, 'desktop Linux'):
-                sim.display_environment('native')
+    def test_native_mode_rejects_mac_and_powershell(self):
+        for system in ('Darwin', 'Windows'):
+            with patch.object(sim.platform, 'system', return_value=system):
+                with self.assertRaisesRegex(RuntimeError, 'Ubuntu WSL2 terminal'):
+                    sim.display_environment('native')
+
+    def test_wslg_uses_socket_without_exporting_host_cookie(self):
+        with patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'is_wsl', return_value=True), \
+             patch.dict(sim.os.environ, {'DISPLAY': ':0'}), \
+             patch.object(sim.Path, 'is_socket', return_value=True), \
+             patch.object(sim.subprocess, 'run') as run:
+            env = sim.display_environment('native', prepare=True)
+            self.assertEqual(env, {'STI_HOST_DISPLAY': ':0', 'STI_WSLG_X11_DIR': '/mnt/wslg/.X11-unix'})
+            self.assertIn(str(ROOT/'compose.wslg.yaml'), sim.compose('cpu', 'native'))
+            self.assertNotIn(str(ROOT/'compose.native.yaml'), sim.compose('cpu', 'native'))
+        run.assert_not_called()
+
+    def test_wslg_reports_missing_socket_before_starting_container(self):
+        with patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'is_wsl', return_value=True), \
+             patch.dict(sim.os.environ, {'DISPLAY': ':0'}), \
+             patch.object(sim.Path, 'is_socket', return_value=False):
+            with self.assertRaisesRegex(RuntimeError, 'WSLg X11 socket is unavailable'):
+                sim.display_environment('native', prepare=True)
+            self.assertEqual(sim.display_environment('native')['STI_HOST_DISPLAY'], ':0')
+
+    def test_wslg_rejects_old_external_x_server_override(self):
+        with patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'is_wsl', return_value=True), \
+             patch.dict(sim.os.environ, {'DISPLAY': '192.168.1.2:0'}):
+            with self.assertRaisesRegex(RuntimeError, 'Remove any custom DISPLAY'):
+                sim.display_environment('native', prepare=True)
 
     def test_inspection_does_not_require_display(self):
         with patch.object(sim.platform, 'system', return_value='Linux'), \

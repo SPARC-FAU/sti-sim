@@ -64,7 +64,7 @@ class InitialPose(unittest.TestCase):
 
     def test_base_drive_uses_the_bridged_pal_topics(self):
         import yaml
-        robot = ET.fromstring(pose.add_base_drive(self.description({'torso_lift_joint': 0})))
+        robot = ET.fromstring(pose.add_planar_base(self.description({'torso_lift_joint': 0})))
         self.assertEqual(len(robot.findall('joint')), 1)  # robot itself is unchanged
         topics = {robot.findtext('gazebo/plugin/topic'), robot.findtext('gazebo/plugin/odom_topic'),
                   robot.findtext('gazebo/plugin/tf_topic')}
@@ -72,7 +72,7 @@ class InitialPose(unittest.TestCase):
         bridged = {entry['gz_topic_name']: entry for entry in bridge}
         self.assertLessEqual(topics, set(bridged))
         self.assertEqual(bridged['/mobile_base_controller/cmd_vel_unstamped']['direction'], 'ROS_TO_GZ')
-        self.assertEqual(bridged['/mobile_base_controller/odom_tf']['ros_topic_name'], '/tf')
+        self.assertEqual(bridged['/mobile_base_controller/tf']['ros_topic_name'], '/tf')
         self.assertEqual(robot.findtext('gazebo/plugin/robot_base_frame'), 'base_footprint')
 
 

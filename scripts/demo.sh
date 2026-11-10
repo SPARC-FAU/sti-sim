@@ -15,6 +15,7 @@ if [[ "${STI_SCENE:-hospital}" == hospital ]]; then
   # ROS launch can return zero when an essential child requested shutdown.
   # A disappearing simulation is not a successful long-running desktop service.
   echo 'Hospital launch stopped unexpectedly; inspect /tmp/sti/gazebo.log.' >&2
+  python3 /opt/sti/scripts/diagnose_render.py /tmp/sti/gazebo.log >&2 || true
   exit 1
 elif [[ "$STI_SCENE" != demo ]]; then
   echo "Unknown STI_SCENE: $STI_SCENE (expected hospital or demo)"
@@ -28,7 +29,10 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 0' TERM INT
-/opt/sti/scripts/render.sh ign gazebo -r /opt/sti/worlds/demo.sdf > /tmp/sti/gazebo.log 2>&1 &
+# Separate server/GUI, as in the hospital launch: a stuck GUI can't stop physics.
+/opt/sti/scripts/render.sh ign gazebo -s -r /opt/sti/worlds/demo.sdf > /tmp/sti/gazebo.log 2>&1 &
+children+=("$!")
+/opt/sti/scripts/render.sh ign gazebo -g > /tmp/sti/gazebo-gui.log 2>&1 &
 children+=("$!")
 ros2 run ros_gz_bridge parameter_bridge --ros-args -p config_file:=/opt/sti/config/bridge.yaml > /tmp/sti/bridge.log 2>&1 &
 children+=("$!")
@@ -40,5 +44,6 @@ children+=("$!")
 set +e
 wait -n "${children[@]}"
 status=$?
-echo "A demo process exited (status $status). Inspect /tmp/sti/*.log."
+echo "A demo process exited (status $status). Inspect /tmp/sti/*.log." >&2
+python3 /opt/sti/scripts/diagnose_render.py /tmp/sti/gazebo.log /tmp/sti/gazebo-gui.log /tmp/sti/rviz.log >&2 || true
 exit 1

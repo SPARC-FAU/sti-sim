@@ -1,6 +1,21 @@
 # Sensor transport names verified against PAL's humble-devel bridge configuration.
-# ros2_control provides joint states. The base is driven by Gazebo itself
-# (see add_base_drive in scripts/initial_pose.py), on PAL's topic names.
+# Native ros2_control provides joint states; don't bridge duplicates. The base
+# topics keep PAL's names but are served by Gazebo systems (see initial_pose.py).
+- ros_topic_name: /mobile_base_controller/cmd_vel_unstamped
+  gz_topic_name: /mobile_base_controller/cmd_vel_unstamped
+  ros_type_name: geometry_msgs/msg/Twist
+  gz_type_name: ignition.msgs.Twist
+  direction: ROS_TO_GZ
+- ros_topic_name: /mobile_base_controller/odom
+  gz_topic_name: /mobile_base_controller/odom
+  ros_type_name: nav_msgs/msg/Odometry
+  gz_type_name: ignition.msgs.Odometry
+  direction: GZ_TO_ROS
+- ros_topic_name: /tf
+  gz_topic_name: /mobile_base_controller/tf
+  ros_type_name: tf2_msgs/msg/TFMessage
+  gz_type_name: ignition.msgs.Pose_V
+  direction: GZ_TO_ROS
 - ros_topic_name: /clock
   gz_topic_name: /clock
   ros_type_name: rosgraph_msgs/msg/Clock
@@ -41,18 +56,3 @@
   gz_type_name: ignition.msgs.PointCloudPacked
   direction: GZ_TO_ROS
   qos_profile: SENSOR_DATA
-- ros_topic_name: /mobile_base_controller/cmd_vel_unstamped
-  gz_topic_name: /mobile_base_controller/cmd_vel_unstamped
-  ros_type_name: geometry_msgs/msg/Twist
-  gz_type_name: ignition.msgs.Twist
-  direction: ROS_TO_GZ
-- ros_topic_name: /mobile_base_controller/odom
-  gz_topic_name: /mobile_base_controller/odom
-  ros_type_name: nav_msgs/msg/Odometry
-  gz_type_name: ignition.msgs.Odometry
-  direction: GZ_TO_ROS
-- ros_topic_name: /tf
-  gz_topic_name: /mobile_base_controller/odom_tf
-  ros_type_name: tf2_msgs/msg/TFMessage
-  gz_type_name: ignition.msgs.Pose_V
-  direction: GZ_TO_ROS

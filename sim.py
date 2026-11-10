@@ -19,16 +19,18 @@ def is_wsl():
     return 'microsoft' in platform.release().lower()
 
 
-def choose_backend(mode, requested, daemon_kernel=''):
+def choose_backend(mode, requested, display='browser'):
     if mode == 'cpu':
         return 'cpu'
     if requested != 'auto':
         return requested
-    # The Docker daemon's kernel, not the client OS, decides which GPU path exists:
-    # Docker Desktop on Windows and Docker Engine inside WSL both run on WSL2.
-    if 'microsoft' in daemon_kernel.lower():
-        return 'wsl'
-    if platform.system() == 'Linux' and not is_wsl():
+    if platform.system() == 'Linux' and is_wsl():
+        if (display == 'native' and Path('/dev/dxg').exists()
+                and Path('/usr/lib/wsl/lib/libd3d12.so').exists()
+                and Path('/usr/lib/wsl/lib/libdxcore.so').exists()):
+            return 'wslgpu'
+        return 'cpu'
+    if platform.system() == 'Linux':
         if Path('/dev/nvidiactl').exists():
             return 'nvidia'
         if glob.glob('/dev/dri/renderD*'):
@@ -41,7 +43,8 @@ def compose(backend, display='browser'):
     if backend != 'cpu':
         result += ['-f', str(ROOT / f'compose.{backend}.yaml')]
     if display == 'native':
-        result += ['-f', str(ROOT / 'compose.native.yaml')]
+        overlay = 'compose.wslg.yaml' if is_wsl() else 'compose.native.yaml'
+        result += ['-f', str(ROOT / overlay)]
     return result
 
 
@@ -80,8 +83,9 @@ def prepare_workspace():
 def environment(mode, backend):
     env = os.environ.copy()
     env.update(host_user())
-    # Without a GPU mapping there is nothing to probe (macOS, or Linux without a GPU).
-    env['STI_RENDER_MODE'] = 'cpu' if backend == 'cpu' else mode
+    env['STI_RENDER_MODE'] = mode
+    if backend == 'wslgpu':
+        env['STI_DXG_GID'] = str(os.stat('/dev/dxg').st_gid)
     if backend == 'dri':
         renders = sorted(glob.glob('/dev/dri/renderD*'))
         cards = sorted(glob.glob('/dev/dri/card*'))
@@ -99,8 +103,18 @@ def run(args, env):
 def display_environment(display, prepare=False):
     if display == 'browser':
         return {}
-    if platform.system() != 'Linux' or is_wsl():
-        raise RuntimeError('Native windows currently support desktop Linux only. Use --display browser on Windows/macOS.')
+    if platform.system() != 'Linux':
+        raise RuntimeError('Native windows require desktop Linux or an Ubuntu WSL2 terminal with WSLg. On Windows, run this command inside WSL, not PowerShell. Use --display browser on macOS.')
+    if is_wsl():
+        host_display = os.environ.get('DISPLAY', ':0')
+        socket_directory = Path('/mnt/wslg/.X11-unix')
+        if prepare:
+            if not host_display.startswith(':') or not host_display[1:].split('.')[0].isdigit():
+                raise RuntimeError('WSLg needs its local DISPLAY (normally :0). Remove any custom DISPLAY override in your WSL shell.')
+            socket = socket_directory / ('X' + host_display[1:].split('.')[0])
+            if not socket.is_socket():
+                raise RuntimeError('WSLg X11 socket is unavailable. Update WSL with `wsl --update` in PowerShell, restart WSL, and run from an Ubuntu WSL2 terminal.')
+        return {'STI_HOST_DISPLAY': host_display, 'STI_WSLG_X11_DIR': str(socket_directory)}
     host_display = os.environ.get('DISPLAY', '')
     if not host_display.startswith(':'):
         if prepare:
@@ -153,8 +167,7 @@ def write_state(state):
 
 
 def check_docker_access():
-    """Return the Docker daemon's kernel version after confirming access."""
-    result = subprocess.run(['docker', 'info', '--format', '{{.OSType}}/{{.Architecture}} {{.KernelVersion}}'],
+    result = subprocess.run(['docker', 'info', '--format', '{{.OSType}}/{{.Architecture}}'],
                             capture_output=True, text=True)
     if result.returncode:
         detail = (result.stderr + result.stdout).strip()
@@ -168,7 +181,6 @@ def check_docker_access():
                 'Check that the Docker engine is running (`docker info`).')
         raise RuntimeError('Docker is not running. ' + hint + '\n' + detail)
     print(result.stdout.strip())
-    return result.stdout.strip().partition(' ')[2]
 
 
 def wait_ready(command, env):
@@ -176,11 +188,61 @@ def wait_ready(command, env):
     run(command + ['up', '-d', '--wait', '--wait-timeout', '180'], env)
 
 
+GRAPHICS_FAILURE = 'STI graphics failure'
+
+
+def graphics_failure(directory):
+    """Return the container's graphics-failure explanation from saved logs, if any."""
+    path = directory / 'demo.err'
+    if not path.exists():
+        return None
+    for line in path.read_text(errors='replace').splitlines():
+        if line.startswith(GRAPHICS_FAILURE):
+            return line
+    return None
+
+
+def collect_diagnostics(command, env):
+    """Keep the failing container's logs, including after its entrypoint exits.
+
+    Returns the recorded graphics-failure explanation, or None.
+    """
+    try:
+        print('Startup failed. Container status and logs:', flush=True)
+        subprocess.run(command + ['ps', '-a'], cwd=ROOT, env=env, timeout=15)
+        subprocess.run(command + ['logs', '--no-color', '--tail', '100'], cwd=ROOT, env=env, timeout=15)
+        directory = ROOT / '.sti-diagnostics'
+        directory.mkdir(exist_ok=True)
+        destination = Path(tempfile.mkdtemp(prefix='startup-', dir=directory))
+        # Compose cp works on stopped containers, unlike exec. Copy individual
+        # logs to avoid runtime sockets and keep graphics errors after fallback.
+        for name in ('display-probe.log', 'gpu-probe.log', 'gpu-check.log', 'renderer.log',
+                     'renderer-check.log', 'gazebo.log', 'gazebo-gui.log', 'rviz.log',
+                     'demo.err', 'supervisor.log'):
+            subprocess.run(command + ['cp', 'sim:/tmp/sti/' + name, str(destination / name)],
+                           cwd=ROOT, env=env, capture_output=True, text=True, timeout=10)
+        print('Diagnostic files: ' + str(destination), flush=True)
+        for name in ('renderer.log', 'demo.err', 'gazebo.log'):
+            path = destination / name
+            if path.exists():
+                print('--- ' + name + ' (last 60 lines) ---', flush=True)
+                print('\n'.join(path.read_text(errors='replace').splitlines()[-60:]), flush=True)
+        failure = graphics_failure(destination)
+        if failure:
+            # Repeat the cause last, where it isn't buried under log output.
+            print('\n' + failure, flush=True)
+        return failure
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        # Reporting must not replace the original startup error.
+        print('Could not save all diagnostics: ' + str(exc), flush=True)
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['build', 'up', 'down', 'clean', 'logs', 'shell', 'check', 'doctor'])
     parser.add_argument('--mode', choices=['auto', 'gpu', 'cpu'], default='auto')
-    parser.add_argument('--backend', choices=['auto', 'dri', 'nvidia', 'wsl'], default='auto')
+    parser.add_argument('--backend', choices=['auto', 'dri', 'nvidia'], default='auto')
     parser.add_argument('--motion', action='store_true', help='check: move demo robot briefly')
     parser.add_argument('--scene', choices=['hospital', 'demo'], default=os.environ.get('STI_SCENE', 'hospital'))
     parser.add_argument('--display', choices=['browser', 'native'], default='browser')
@@ -188,9 +250,9 @@ def main():
     if not shutil.which('docker'):
         parser.exit(1, 'Install Docker Engine + Compose on Linux, or Docker Desktop on Windows/macOS.\n')
     try:
-        daemon_kernel = check_docker_access()
+        check_docker_access()
         run(['docker', 'compose', 'version'], os.environ.copy())
-        backend = choose_backend(args.mode, args.backend, daemon_kernel)
+        backend = choose_backend(args.mode, args.backend, args.display)
         mode = args.mode
         scene = args.scene
         display = args.display
@@ -200,8 +262,11 @@ def main():
             scene = state.get('scene', 'demo')
             display = state.get('display', 'browser')
         if args.command == 'up' and mode == 'gpu' and backend == 'cpu':
-            raise RuntimeError('No supported GPU backend detected. GPU rendering needs Linux GPU access '
-                               'or Windows 11 with Docker on WSL2; otherwise use --mode cpu.')
+            raise RuntimeError('No supported GPU backend detected. WSLg GPU mode requires --display native, /dev/dxg and WSL GPU libraries. Update WSL and the Windows GPU driver, or use --mode cpu.')
+        # Without a GPU overlay (WSL browser display, macOS, Linux without a GPU)
+        # there is nothing to probe: use the portable software path.
+        if backend == 'cpu' and mode == 'auto':
+            mode = 'cpu'
         env = environment(mode, backend)
         env['STI_SCENE'] = scene
         env.update(display_environment(display, prepare=args.command == 'up'))
@@ -213,35 +278,43 @@ def main():
                 print(f"Created {ROOT / 'workspace'} from starter/.")
             # Build independently of GPU runtime availability.
             run(compose('cpu') + ['build'], env)
-            try:
-                wait_ready(command, env)
-            except subprocess.CalledProcessError:
-                if mode != 'auto' or backend == 'cpu':
-                    raise
-                print('GPU startup failed. Saving logs, then retrying with CPU rendering.', flush=True)
-                subprocess.run(command + ['logs', '--no-color', '--tail', '80'], cwd=ROOT, env=env)
-                run(command + ['down'], env)
-                backend, mode = 'cpu', 'cpu'
-                env = environment(mode, backend)
-                env['STI_SCENE'] = scene
-                env.update(display_environment(display))
-                command = compose(backend, display)
-                wait_ready(command, env)
+            while True:
+                print(f'Starting {scene}: display={display}, backend={backend}, mode={mode}', flush=True)
+                write_state({'backend': backend, 'mode': mode, 'scene': scene, 'display': display})
+                started = False
+                try:
+                    wait_ready(command, env)
+                    started = True
+                    # Do not mask missing sensor data as a successful start.
+                    run(command + ['exec', '-T', 'sim', 'bash', '-lc',
+                                   'source /opt/ros/humble/setup.bash && python3 /opt/sti/scripts/check.py'], env)
+                    run(command + ['exec', '-T', 'sim', 'grep', 'OpenGL renderer string', '/tmp/sti/renderer.log'], env)
+                    break
+                except subprocess.CalledProcessError:
+                    failure = collect_diagnostics(command, env)
+                    # In auto mode, a GPU that fails to start or crashes the
+                    # simulator falls back to CPU. Other application or sensor
+                    # failures are reported rather than hidden by a restart.
+                    gpu_crash = bool(failure) and failure.startswith(GRAPHICS_FAILURE + ' (gpu)')
+                    if mode != 'auto' or backend == 'cpu' or (started and not gpu_crash):
+                        raise
+                    reason = 'crashed the simulator' if started else 'startup failed'
+                    print(f'GPU rendering {reason}. Logs saved; retrying with CPU rendering.', flush=True)
+                    run(command + ['down'], env)
+                    backend, mode = 'cpu', 'cpu'
+                    env = environment(mode, backend)
+                    env['STI_SCENE'] = scene
+                    env.update(display_environment(display))
+                    command = compose(backend, display)
             write_state({'backend': backend, 'mode': mode, 'scene': scene, 'display': display})
-            # Do not mask missing sensor data as a successful start.
-            run(command + ['exec', '-T', 'sim', 'bash', '-lc',
-                           'source /opt/ros/humble/setup.bash && python3 /opt/sti/scripts/check.py'], env)
-            run(command + ['exec', '-T', 'sim', 'bash', '-c',
-                           'grep "OpenGL renderer string" /tmp/sti/renderer.log; if [[ -s /tmp/sti/gpu-fallback-reason ]]; then '
-                           'echo "GPU not used: $(cat /tmp/sti/gpu-fallback-reason). See /tmp/sti/gpu-probe.log."; fi'], env)
             if display == 'native':
-                print('Gazebo and RViz open as windows on your Linux desktop.')
+                print('Gazebo and RViz open as windows on your desktop.')
             else:
                 print(f"Open http://localhost:{env.get('STI_PORT', '6080')}/vnc.html?autoconnect=true&resize=scale")
             print(f"Your code: {ROOT / 'workspace'} (/workspace in the container).\n"
                   'To move to a new version or another computer, copy that workspace/ folder across.')
         elif args.command == 'doctor':
-            print('Host:', platform.system(), platform.machine(), 'WSL:', is_wsl(), 'Docker kernel:', daemon_kernel)
+            print('Host:', platform.system(), platform.machine(), 'WSL:', is_wsl())
             print('Backend:', backend, 'Mode:', mode, 'Display:', display)
             print('Image: built for the Docker engine architecture shown above.')
             run(command + ['config', '--quiet'], env)

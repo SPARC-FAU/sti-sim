@@ -90,6 +90,7 @@ To move to another computer or a new version of the simulation, copy the
 | Still `FAIL`, or a black or broken picture | Run `python3 sim.py down`, then `python3 sim.py up --mode cpu`. |
 | The browser page does not load | Check that `up` printed `PASS`. If port 6080 is in use, set `STI_PORT` to another port before `up`. |
 | Slow or stuttering | In Docker Desktop, *Settings → Resources*: at least 4 CPUs and 8 GB memory. On macOS it always runs slower than real time. |
+| Slow on Windows | Run it from an Ubuntu (WSL) terminal instead of PowerShell: `python3 sim.py up --display native`. Gazebo and RViz then open as normal windows and use your graphics card. |
 | Your package stops building | Run `python3 sim.py clean`, then `up` and `colcon build` again. |
 
 Still stuck? Post the output of `python3 sim.py doctor` and

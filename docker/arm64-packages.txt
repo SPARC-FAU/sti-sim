@@ -1,0 +1,18 @@
+# arm64 only: run-time dependencies of the three PAL packages that the
+# Dockerfile installs from source on arm64 (see the comment there).
+ros-humble-tiago-pro-bringup
+ros-humble-tiago-pro-controller-configuration
+ros-humble-tiago-pro-head-description
+ros-humble-tiago-pro-2dnav
+ros-humble-tiago-pro-laser-sensors
+ros-humble-tiago-pro-rgbd-sensors
+ros-humble-pal-sea-arm-description
+ros-humble-pal-sea-arm-moveit-config
+ros-humble-pal-pro-gripper-description
+ros-humble-pal-urdf-utils
+ros-humble-omni-base-controller-configuration
+ros-humble-omni-base-2dnav
+ros-humble-realsense2-description
+ros-humble-launch-pal
+ros-humble-launch-param-builder
+ros-humble-robot-state-publisher

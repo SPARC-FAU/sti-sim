@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Cyclone DDS settings for the single-container simulation (see README: ROS
+  middleware). ROS_LOCALHOST_ONLY=1 restricts DDS to the loopback interface,
+  which has no multicast in Docker, so Cyclone discovers participants by
+  unicast. Each process then needs a participant index, and Cyclone's default
+  limit is too low for the ~20 processes of the TIAGo launch plus student
+  nodes; extra processes fail with "failed to create domain".
+-->
+<CycloneDDS xmlns="https://cdds.io/config">
+  <Domain Id="any">
+    <Discovery>
+      <ParticipantIndex>auto</ParticipantIndex>
+      <MaxAutoParticipantIndex>120</MaxAutoParticipantIndex>
+      <Peers>
+        <Peer Address="localhost"/>
+      </Peers>
+    </Discovery>
+  </Domain>
+</CycloneDDS>

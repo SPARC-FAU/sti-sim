@@ -9,3 +9,4 @@ worlds/hospital/
 workspace/
 .workspace-*/
 starter/
+.sti-diagnostics/

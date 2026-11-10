@@ -1,10 +1,15 @@
 name: sti-sim
 services:
   sim:
-    image: sti-sim:humble-amd64
-    platform: linux/amd64
+    # Built for the Docker engine's own architecture (amd64, or arm64 on Apple Silicon).
+    image: sti-sim:humble
     build:
       context: .
+      args:
+        # sim.py sets these to the host user on Linux so files in workspace/
+        # belong to the student on both sides. Docker Desktop maps ownership itself.
+        STI_UID: ${STI_UID:-1000}
+        STI_GID: ${STI_GID:-1000}
     init: true
     shm_size: 1gb
     ports:
@@ -15,8 +20,21 @@ services:
       DESKTOP_SIZE: ${DESKTOP_SIZE:-1280x800}
       STI_SCENE: ${STI_SCENE:-hospital}
     volumes:
-      - workspace:/workspace
+      # Student code is an ordinary host folder next to this file, so no Docker
+      # command (down -v, rebuilds, resets) can delete it. sim.py creates it from
+      # starter/ on first start; a missing folder is an error, never auto-created.
+      - type: bind
+        source: ./workspace
+        target: /workspace
+        bind:
+          create_host_path: false
+      # colcon's build/, install/ and log/ (see config/colcon.yaml). They are specific
+      # to this computer, so they stay out of workspace/, which holds only source and
+      # can be copied to any other platform. `sim.py clean` removes this volume.
+      - type: volume
+        source: colcon
+        target: /colcon
     security_opt:
       - no-new-privileges:true
 volumes:
-  workspace:
+  colcon:

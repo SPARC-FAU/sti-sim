@@ -2,7 +2,16 @@
 set -eo pipefail
 source /opt/ros/humble/setup.bash
 if [[ "${STI_SCENE:-hospital}" == hospital ]]; then
-  /opt/sti/scripts/render.sh ros2 launch /opt/sti/scripts/hospital.launch.py > /tmp/sti/gazebo.log 2>&1
+  # spawn_robot.py leaves a marker when the controllers never start (a rare
+  # start-up race that freezes Gazebo). Only that case is retried.
+  for attempt in 1 2 3; do
+    rm -f /tmp/sti/startup-stalled
+    /opt/sti/scripts/render.sh ros2 launch /opt/sti/scripts/hospital.launch.py > /tmp/sti/gazebo.log 2>&1 || true
+    [[ -e /tmp/sti/startup-stalled ]] || break
+    pkill -KILL -f 'ign gazebo' || true
+    cp /tmp/sti/gazebo.log "/tmp/sti/gazebo.stalled-$attempt.log"
+    echo "Start-up stalled (attempt $attempt); restarting the simulation." >&2
+  done
   # ROS launch can return zero when an essential child requested shutdown.
   # A disappearing simulation is not a successful long-running desktop service.
   echo 'Hospital launch stopped unexpectedly; inspect /tmp/sti/gazebo.log.' >&2

@@ -33,14 +33,6 @@ def generate_launch_description():
         launch_arguments={'use_sim_time': 'True', 'is_public_sim': 'True',
                           'gazebo_version': 'gazebo'}.items(),
     )
-    # PAL's nested default-controller launch does not forward gazebo_version to
-    # the base launch in current Humble releases, so its Classic-only condition
-    # can skip this controller. Include it explicitly with the modern simulator.
-    base_controller = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(str(Path(get_package_share_directory('omni_base_controller_configuration')) / 'launch/mobile_base_controller.launch.py')),
-        launch_arguments={'use_sim_time': 'True', 'is_public_sim': 'True',
-                          'gazebo_version': 'gazebo'}.items(),
-    )
     gazebo = ExecuteProcess(cmd=['ign', 'gazebo', '-r', '-v', '3', str(ROOT / 'worlds/hospital.sdf')], output='screen')
     spawn = ExecuteProcess(cmd=['python3', str(ROOT / 'scripts/spawn_robot.py')], output='screen')
     bridge = Node(package='ros_gz_bridge', executable='parameter_bridge', name='hospital_sensor_bridge',
@@ -55,5 +47,5 @@ def generate_launch_description():
             return [EmitEvent(event=Shutdown(reason='TIAGo spawn failed; inspect gazebo.log'))]
         return []
     actions.append(RegisterEventHandler(OnProcessExit(target_action=spawn, on_exit=spawn_exited)))
-    actions += [gazebo, bringup, base_controller, spawn, bridge, rviz]
+    actions += [gazebo, bringup, spawn, bridge, rviz]
     return LaunchDescription(actions)

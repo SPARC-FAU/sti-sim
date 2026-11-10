@@ -1,0 +1,16 @@
+# Windows 11 with Docker on WSL2 (Docker Desktop or Docker Engine in a WSL distro).
+# OpenGL runs on the Windows GPU through Mesa's d3d12 driver and the WSL GPU device.
+services:
+  sim:
+    devices:
+      - /dev/dxg:/dev/dxg
+    volumes:
+      # Direct3D 12 user-mode libraries provided by Windows and the GPU driver.
+      - type: bind
+        source: /usr/lib/wsl
+        target: /usr/lib/wsl
+        read_only: true
+    environment:
+      STI_GPU_BACKEND: wsl
+      # Optional: pick a GPU on hybrid laptops, e.g. NVIDIA or AMD. Unset by default.
+      MESA_D3D12_DEFAULT_ADAPTER_NAME:

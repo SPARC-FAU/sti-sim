@@ -8,3 +8,5 @@ log/
 worlds/hospital/
 gazebo.log
 .sti-native/
+workspace/
+.workspace-*/

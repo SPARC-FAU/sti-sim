@@ -6,3 +6,6 @@ tests
 README.md
 worlds/hospital/
 .sti-native/
+workspace/
+.workspace-*/
+starter/

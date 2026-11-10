@@ -5,6 +5,30 @@ import time
 import yaml
 
 
+STALLED = Path('/tmp/sti/startup-stalled')
+
+
+def controllers_started(timeout=40):
+    """Whether Gazebo's ros2_control plugin came up after the robot was created.
+
+    The plugin fetches the robot description with a ROS service call and waits
+    for the answer without a timeout. On a busy machine that answer is
+    occasionally lost while the two nodes are still discovering each other
+    ("failed to send response ... client will not receive response"), which
+    freezes the Gazebo server for good. Normally this takes a few seconds.
+    """
+    import rclpy
+    from controller_manager_msgs.srv import ListControllers
+    rclpy.init()
+    node = rclpy.create_node('sti_startup_check')
+    try:
+        client = node.create_client(ListControllers, '/controller_manager/list_controllers')
+        return client.wait_for_service(timeout_sec=timeout)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
 def main():
     from initial_pose import configure_initial_pose
     configure_initial_pose()
@@ -29,6 +53,10 @@ def main():
     # Some Humble versions return zero even for a failed create request.
     if result.returncode or 'Requested creation of entity' not in output:
         raise SystemExit('TIAGo creation was not acknowledged by Gazebo')
+    if not controllers_started():
+        # demo.sh restarts the launch when it finds this marker.
+        STALLED.write_text('controller manager did not start\n')
+        raise SystemExit('Robot controllers did not start; the simulation will be restarted')
 
 
 if __name__ == '__main__':

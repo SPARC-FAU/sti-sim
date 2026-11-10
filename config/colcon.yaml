@@ -1,0 +1,11 @@
+# colcon defaults inside the container (COLCON_DEFAULTS_FILE).
+# Build output goes to the /colcon volume instead of /workspace, so the student's
+# workspace/ folder contains only source code and is the same on every platform.
+build:
+  build-base: /colcon/build
+  install-base: /colcon/install
+test:
+  build-base: /colcon/build
+  install-base: /colcon/install
+test-result:
+  test-result-base: /colcon/build

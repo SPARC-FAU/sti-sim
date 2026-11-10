@@ -20,7 +20,7 @@ from tf2_ros import Buffer, TransformListener
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--motion', action='store_true')
-    parser.add_argument('--timeout', type=float, default=180)
+    parser.add_argument('--timeout', type=float, default=300)  # allows for a start-up retry
     parser.add_argument('--scene', choices=['hospital', 'demo'], default=os.environ.get('STI_SCENE', 'hospital'))
     args = parser.parse_args()
     rclpy.init()

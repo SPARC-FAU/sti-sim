@@ -21,6 +21,20 @@ class BackendSelection(unittest.TestCase):
         access = patch.object(sim, 'check_docker_access')
         access.start()
         self.addCleanup(access.stop)
+        arena = patch.object(sim, 'ARENA', ROOT / 'sim.py')  # any file that exists
+        arena.start()
+        self.addCleanup(arena.stop)
+
+    def test_missing_hospital_model_is_explained_before_docker_runs(self):
+        with patch.object(sim, 'ARENA', ROOT / 'worlds/missing.glb'), \
+             patch.object(sim, 'run') as run, \
+             patch.object(sim.sys, 'argv', ['sim.py', 'up']), \
+             patch.object(sim.sys, 'stderr') as stderr:
+            with self.assertRaises(SystemExit) as stopped:
+                sim.main()
+        self.assertEqual(stopped.exception.code, 1)
+        self.assertIn('course forum', stderr.write.call_args.args[0])
+        run.assert_not_called()
 
     def test_cpu_never_requests_gpu_even_if_explicit_backend(self):
         self.assertEqual(sim.choose_backend('cpu', 'nvidia'), 'cpu')

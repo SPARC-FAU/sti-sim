@@ -8,7 +8,9 @@ It runs in Docker on Linux, Windows and macOS.
 You need [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 (Windows, macOS) or Docker Engine (Linux), and Python 3.10 or newer.
 
-Start Docker, open a terminal in this folder and run:
+Download `2026_09_01_RoboCup_HCC_Arena_V1.glb` (the hospital model) from the course
+forum and put it in the `worlds` folder. Then start Docker, open a terminal in
+this folder and run:
 
 ```sh
 python3 sim.py up

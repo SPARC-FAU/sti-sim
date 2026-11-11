@@ -13,6 +13,8 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent
 STATE = ROOT / '.sti-state.json'
+# The hospital model is not part of the repository; it is downloaded separately.
+ARENA = ROOT / 'worlds/2026_09_01_RoboCup_HCC_Arena_V1.glb'
 
 
 def is_wsl():
@@ -287,6 +289,9 @@ def main():
     parser.add_argument('--display', choices=['auto', 'browser', 'native'], default='auto',
                         help='auto: native windows on Linux and WSL, browser desktop elsewhere')
     args = parser.parse_args()
+    if args.command in ('build', 'up') and not ARENA.exists():
+        parser.exit(1, f'The hospital model is missing. Download {ARENA.name} from the course forum\n'
+                       f'and put it in {ARENA.parent}, then run this command again.\n')
     if not shutil.which('docker'):
         parser.exit(1, 'Install Docker Engine + Compose on Linux, or Docker Desktop on Windows/macOS.\n')
     try:

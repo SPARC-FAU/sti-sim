@@ -6,6 +6,7 @@ build/
 install/
 log/
 worlds/hospital/
+worlds/*.glb
 gazebo.log
 .sti-native/
 

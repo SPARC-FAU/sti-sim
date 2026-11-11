@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('prepare_hospital', ROOT / 'scripts/prepare_hospital.py')
 converter = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(converter)
+ARENA = ROOT / 'worlds/2026_09_01_RoboCup_HCC_Arena_V1.glb'
+needs_arena = unittest.skipUnless(ARENA.exists(), 'the hospital model is downloaded separately')
 
 
 def fixture(path, *, mode=4, scale=None):
@@ -100,9 +102,10 @@ class ConversionTests(unittest.TestCase):
         for normal in normals:
             self.assertAlmostEqual(math.hypot(*normal), 1)
 
+    @needs_arena
     def test_complete_hospital_exports_valid_dart_normals(self):
         with tempfile.TemporaryDirectory() as directory:
-            report = converter.convert(ROOT/'worlds/2026_09_01_RoboCup_HCC_Arena_V1.glb', directory)
+            report = converter.convert(ARENA, directory)
             for name, check in report['mesh_checks'].items():
                 self.assertEqual(check['normals'], check['vertices'], name)
                 self.assertGreater(check['triangles'], 300000)
@@ -124,9 +127,9 @@ class ConversionTests(unittest.TestCase):
             parts = list(converter.GLB(source).primitives())
             self.assertEqual(parts[1][2], [0, 2, 3])
 
+    @needs_arena
     def test_hospital_floor_dimensions_and_spawn_clearance(self):
-        source = ROOT / 'worlds/2026_09_01_RoboCup_HCC_Arena_V1.glb'
-        parts = list(converter.GLB(source).primitives())
+        parts = list(converter.GLB(ARENA).primitives())
         floor = [points[i] for name, points, indices, *_ in parts if name == 'Floor' for i in indices]
         low = [min(p[i] for p in floor) for i in range(3)]
         high = [max(p[i] for p in floor) for i in range(3)]

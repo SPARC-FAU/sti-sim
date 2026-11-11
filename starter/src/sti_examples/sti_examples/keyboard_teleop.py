@@ -29,6 +29,7 @@ Base            Torso          Head
   e  slide right
   space  stop
 
+r  reset: stop, torso and head back to their starting pose
 x or Ctrl-C quits. The base keeps moving until you press space.
 """
 
@@ -72,6 +73,11 @@ JOINT_LIMITS = {  # lowest and highest position the joint can reach
     'torso_lift_joint': (0.0, 0.35),
     'head_1_joint': (-1.3, 1.3),
     'head_2_joint': (-1.0, 0.34),
+}
+HOME = {  # the pose the simulation starts in, restored by `r`
+    'torso_lift_joint': 0.1,
+    'head_1_joint': 0.0,
+    'head_2_joint': 0.0,
 }
 CONTROLLERS = {  # controller topic: the joints it moves, in its order
     '/torso_controller/joint_trajectory': ['torso_lift_joint'],
@@ -136,12 +142,18 @@ def main():
                 break
             if key in BASE_KEYS:
                 velocity = base_velocity(key)
+            moved = []  # joints that got a new target
             if key in JOINT_KEYS and len(targets) == len(JOINT_LIMITS):
                 joint, step = JOINT_KEYS[key]
                 targets[joint] = clamp(targets[joint] + step, JOINT_LIMITS[joint])
-                for topic, names in CONTROLLERS.items():
-                    if joint in names:
-                        joints[topic].publish(joint_command(names, targets, positions))
+                moved = [joint]
+            if key == 'r' and len(targets) == len(JOINT_LIMITS):
+                velocity = Twist()
+                targets.update(HOME)
+                moved = list(HOME)
+            for topic, names in CONTROLLERS.items():
+                if any(joint in names for joint in moved):
+                    joints[topic].publish(joint_command(names, targets, positions))
             base.publish(velocity)  # every 0.1 s, also while standing still
             rclpy.spin_once(node, timeout_sec=0)
     except KeyboardInterrupt:

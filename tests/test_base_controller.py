@@ -44,6 +44,11 @@ class ExampleTeleop(unittest.TestCase):
             self.assertIn(joint, self.teleop.JOINT_LIMITS)
             self.assertIn(joint, controlled)
 
+    def test_reset_pose_is_within_the_joint_limits(self):
+        self.assertEqual(set(self.teleop.HOME), set(self.teleop.JOINT_LIMITS))
+        for joint, position in self.teleop.HOME.items():
+            self.assertEqual(self.teleop.clamp(position, self.teleop.JOINT_LIMITS[joint]), position)
+
     def test_torso_target_stays_within_its_limits(self):
         limits = self.teleop.JOINT_LIMITS['torso_lift_joint']
         self.assertEqual(self.teleop.clamp(0.36, limits), 0.35)

@@ -49,6 +49,7 @@ ros2 run sti_examples keyboard_teleop
 | space | Stop |
 | `t` `b` | Torso up, down |
 | `i` `k` `j` `l` | Head up, down, left, right |
+| `r` | Reset: stop, torso and head back to the starting pose |
 | `x` | Quit |
 
 The keys only work while the terminal is the active window.

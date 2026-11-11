@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('sim', ROOT / 'sim.py')
 sim = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sim)
+# `up` picks native windows from the host's DISPLAY; tests set it explicitly.
+sim.os.environ.pop('DISPLAY', None)
 
 
 class BackendSelection(unittest.TestCase):
@@ -297,6 +299,48 @@ class Workspace(unittest.TestCase):
     def test_workspace_is_never_shipped_or_sent_to_docker(self):
         for name in ('.gitignore', '.dockerignore'):
             self.assertIn('workspace/', (ROOT/name).read_text().splitlines())
+
+
+class DisplaySelection(unittest.TestCase):
+    def test_explicit_choice_is_kept(self):
+        self.assertEqual(sim.choose_display('browser', prepare=True), 'browser')
+        self.assertEqual(sim.choose_display('native', prepare=True), 'native')
+
+    def test_mac_and_windows_use_the_browser(self):
+        for system in ('Darwin', 'Windows'):
+            with patch.object(sim.platform, 'system', return_value=system):
+                self.assertEqual(sim.choose_display('auto', prepare=True), 'browser')
+
+    def test_linux_desktop_and_wslg_get_native_windows(self):
+        with patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'display_environment', return_value={}) as prepare:
+            with patch.object(sim, 'is_wsl', return_value=False), \
+                 patch.dict(sim.os.environ, {'DISPLAY': ':0'}):
+                self.assertEqual(sim.choose_display('auto', prepare=True), 'native')
+            with patch.object(sim, 'is_wsl', return_value=True):
+                self.assertEqual(sim.choose_display('auto', prepare=True), 'native')
+        prepare.assert_called_with('native', prepare=True)
+
+    def test_linux_without_a_local_desktop_uses_the_browser(self):
+        with patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'is_wsl', return_value=False), \
+             patch.object(sim, 'display_environment') as prepare:
+            for display in ('', 'localhost:10.0'):
+                with patch.dict(sim.os.environ, {'DISPLAY': display}):
+                    self.assertEqual(sim.choose_display('auto', prepare=True), 'browser')
+        prepare.assert_not_called()
+
+    def test_unusable_native_display_falls_back_to_the_browser(self):
+        with patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'is_wsl', return_value=True), \
+             patch.object(sim, 'display_environment', side_effect=RuntimeError('WSLg X11 socket is unavailable.')):
+            self.assertEqual(sim.choose_display('auto', prepare=True), 'browser')
+
+    def test_only_up_chooses_a_display(self):
+        with patch.object(sim.platform, 'system', return_value='Linux'), \
+             patch.object(sim, 'display_environment') as prepare:
+            self.assertEqual(sim.choose_display('auto'), 'browser')
+        prepare.assert_not_called()
 
 
 class DockerAccess(unittest.TestCase):

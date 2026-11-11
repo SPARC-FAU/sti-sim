@@ -1,8 +1,7 @@
 # Your workspace
 
-This folder is yours. It is an ordinary folder on your computer and appears as
-`/workspace` inside the simulation. Edit it with any editor. The simulation
-never changes or deletes it.
+This is an ordinary folder on your computer and appears as `/workspace` inside
+the simulation. Edit it with any editor.
 
 Put your ROS 2 packages in `src/`, then build them in a simulation terminal
 (`python3 sim.py shell`):

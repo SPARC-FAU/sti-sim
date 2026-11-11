@@ -1,7 +1,7 @@
 # STI Sim
 
 TIAGo Pro in the RoboCup hospital arena, with ROS 2 Humble, Gazebo and RViz.
-It runs in Docker and you use it in your browser.
+It runs in Docker on Linux, Windows and macOS.
 
 ## 1. Start the simulation
 
@@ -14,14 +14,11 @@ Start Docker, open a terminal in this folder and run:
 python3 sim.py up
 ```
 
-On Windows, type `py -3` instead of `python3`.
+On Windows, use an Ubuntu (WSL) terminal.
 
-The first start takes 10 to 20 minutes. When it prints `PASS`, open:
-
-<http://localhost:6080/vnc.html?autoconnect=true&resize=scale>
-
-You should see Gazebo with the robot in the hospital, and RViz with its camera
-and lidar.
+The first start takes 10 to 20 minutes. When it prints `PASS`, Gazebo (the
+robot in the hospital) and RViz (its camera and lidar) open as windows. On
+macOS they are shown in your browser instead, at the address `up` prints.
 
 ## 2. Drive the robot
 
@@ -66,8 +63,7 @@ Topics to start with (`ros2 topic list` shows all of them):
 | `/head_front_camera/color/image_raw` | Head camera |
 | `/joint_states`, `/tf` | Joints and transforms |
 
-**Your code is safe.** No `sim.py` command changes or deletes `workspace/`.
-To move to another computer or a new version of the simulation, copy the
+To continue on another computer or a new version of the simulation, copy the
 `workspace/` folder into the new simulation folder and run `colcon build` again.
 
 ## Commands
@@ -78,7 +74,7 @@ To move to another computer or a new version of the simulation, copy the
 | `python3 sim.py down` | Stop |
 | `python3 sim.py shell` | Terminal inside the simulation |
 | `python3 sim.py check` | Test that the robot's sensors deliver data |
-| `python3 sim.py clean` | Stop and delete build output (not your code) |
+| `python3 sim.py clean` | Stop and delete build output, for a fresh `colcon build` |
 
 ## If something goes wrong
 
@@ -88,9 +84,9 @@ To move to another computer or a new version of the simulation, copy the
 | `permission denied` (Linux) | Run `sudo usermod -aG docker "$USER"`, log out and back in. Do not use `sudo` with `sim.py`. |
 | Startup ends with `FAIL` | Run `python3 sim.py down`, then `python3 sim.py up` again. |
 | Still `FAIL`, or a black or broken picture | Run `python3 sim.py down`, then `python3 sim.py up --mode cpu`. |
+| No windows appear, or they look broken | Run `python3 sim.py down`, then `python3 sim.py up --display browser` and open the address it prints. |
 | The browser page does not load | Check that `up` printed `PASS`. If port 6080 is in use, set `STI_PORT` to another port before `up`. |
 | Slow or stuttering | In Docker Desktop, *Settings → Resources*: at least 4 CPUs and 8 GB memory. On macOS it always runs slower than real time. |
-| Slow on Windows | Run it from an Ubuntu (WSL) terminal instead of PowerShell: `python3 sim.py up --display native`. Gazebo and RViz then open as normal windows and use your graphics card. |
 | Your package stops building | Run `python3 sim.py clean`, then `up` and `colcon build` again. |
 
 Still stuck? Post the output of `python3 sim.py doctor` and

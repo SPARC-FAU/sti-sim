@@ -151,6 +151,24 @@ def display_environment(display, prepare=False):
             'STI_HOST_GID': str(os.getgid())}
 
 
+def choose_display(requested, prepare=False):
+    """Native windows where the host can show them, otherwise the browser desktop."""
+    if requested != 'auto':
+        return requested
+    if not prepare:
+        return 'browser'  # Only `up` chooses; other commands follow the saved state.
+    if platform.system() != 'Linux':
+        return 'browser'  # macOS and Windows outside WSL have no X display to share.
+    if not is_wsl() and not os.environ.get('DISPLAY', '').startswith(':'):
+        return 'browser'  # No local desktop session, for example over SSH.
+    try:
+        display_environment('native', prepare=True)
+    except (RuntimeError, OSError) as exc:
+        print(f'Native windows are not available: {exc}\nUsing the browser desktop instead.', flush=True)
+        return 'browser'
+    return 'native'
+
+
 def write_state(state):
     # Replace the directory entry rather than opening an old sudo-owned file.
     # The repository directory must be writable by the current user.
@@ -245,17 +263,18 @@ def main():
     parser.add_argument('--backend', choices=['auto', 'dri', 'nvidia'], default='auto')
     parser.add_argument('--motion', action='store_true', help='check: move demo robot briefly')
     parser.add_argument('--scene', choices=['hospital', 'demo'], default=os.environ.get('STI_SCENE', 'hospital'))
-    parser.add_argument('--display', choices=['browser', 'native'], default='browser')
+    parser.add_argument('--display', choices=['auto', 'browser', 'native'], default='auto',
+                        help='auto: native windows on Linux and WSL, browser desktop elsewhere')
     args = parser.parse_args()
     if not shutil.which('docker'):
         parser.exit(1, 'Install Docker Engine + Compose on Linux, or Docker Desktop on Windows/macOS.\n')
     try:
         check_docker_access()
         run(['docker', 'compose', 'version'], os.environ.copy())
-        backend = choose_backend(args.mode, args.backend, args.display)
+        display = choose_display(args.display, prepare=args.command == 'up')
+        backend = choose_backend(args.mode, args.backend, display)
         mode = args.mode
         scene = args.scene
-        display = args.display
         if args.command not in ('build', 'up') and STATE.exists():
             state = json.loads(STATE.read_text())
             backend, mode = state['backend'], state['mode']

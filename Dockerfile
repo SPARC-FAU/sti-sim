@@ -1,41 +1,48 @@
-FROM ros:humble-ros-base-jammy
-
-# Built natively for the Docker engine's architecture: amd64 or arm64 (Apple Silicon).
-# Emulating amd64 on arm64 is too slow for the robot's controllers to start.
-ARG TARGETARCH
+# The image is built natively for the Docker engine's architecture. Emulating
+# amd64 on Apple Silicon is too slow for the robot's controllers to start.
+# Only the packages stage matching that architecture is built.
+FROM ros:humble-ros-base-jammy AS base
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
-COPY docker/apt-packages.txt docker/arm64-packages.txt /tmp/sti/
-# On amd64 every package in apt-packages.txt is released. On arm64 three PAL
-# packages are not, only because they (indirectly) list Gazebo Classic plugins
-# that this simulation (Gazebo Fortress) does not use. They hold no compiled
-# code, so the same released versions are installed from PAL's tagged sources
-# into the ROS prefix; arm64-packages.txt lists what they need at run time.
+COPY docker/apt-packages.txt /tmp/sti/
+
+# amd64 (Linux, Windows, Intel Macs): every package is released.
+FROM base AS packages-amd64
+RUN apt-get update \
+    && sed 's/\r$//; /^[[:space:]]*#/d; /^[[:space:]]*$/d' /tmp/sti/apt-packages.txt \
+      | xargs -r apt-get install -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* /tmp/sti
+
+# arm64 (Apple Silicon): three PAL packages are not released, only because they
+# (indirectly) list Gazebo Classic plugins that this simulation (Gazebo Fortress)
+# does not use. They hold no compiled code, so the same released versions are
+# installed from PAL's tagged sources into the ROS prefix; arm64-packages.txt
+# lists what they need at run time.
+FROM base AS packages-arm64
+COPY docker/arm64-packages.txt /tmp/sti/
 ARG ARM64_SOURCE_PACKAGES="ros-humble-tiago-pro-gazebo ros-humble-tiago-pro-description ros-humble-tiago-pro-moveit-config"
 ARG OMNI_BASE_ROBOT_COMMIT=251ecc4cf57ed1870e84dcc135be917676e318f2
 ARG TIAGO_PRO_ROBOT_COMMIT=59eff25559b0f071ac5cf6d3c4c72c2e33b8951a
 ARG TIAGO_PRO_MOVEIT_CONFIG_COMMIT=fa1f97542f85c15c464d9685b93584316b8ceead
 RUN apt-get update \
     && packages() { sed 's/\r$//; /^[[:space:]]*#/d; /^[[:space:]]*$/d' "$@"; } \
-    && if [[ "$TARGETARCH" == arm64 ]]; then \
-      { packages /tmp/sti/apt-packages.txt | grep -vxF -f <(tr ' ' '\n' <<< "$ARM64_SOURCE_PACKAGES"); \
-        packages /tmp/sti/arm64-packages.txt; } | xargs -r apt-get install -y --no-install-recommends \
-      && source /opt/ros/humble/setup.bash \
-      && fetch() { git init -q "/tmp/pal/$1" && git -C "/tmp/pal/$1" fetch -q --depth 1 \
-           "https://github.com/pal-robotics/$1" "$2" && git -C "/tmp/pal/$1" checkout -q FETCH_HEAD; } \
-      && fetch omni_base_robot "$OMNI_BASE_ROBOT_COMMIT" \
-      && fetch tiago_pro_robot "$TIAGO_PRO_ROBOT_COMMIT" \
-      && fetch tiago_pro_moveit_config "$TIAGO_PRO_MOVEIT_CONFIG_COMMIT" \
-      && for package in omni_base_robot/omni_base_description tiago_pro_robot/tiago_pro_description \
-           tiago_pro_moveit_config; do \
-           cmake -S "/tmp/pal/$package" -B /tmp/pal/build -DCMAKE_INSTALL_PREFIX=/opt/ros/humble -DBUILD_TESTING=OFF \
-           && cmake --build /tmp/pal/build --target install && rm -rf /tmp/pal/build || exit 1; \
-         done \
-      && rm -rf /tmp/pal; \
-    else \
-      packages /tmp/sti/apt-packages.txt | xargs -r apt-get install -y --no-install-recommends; \
-    fi \
-    && rm -rf /var/lib/apt/lists/* /tmp/sti
+    && { packages /tmp/sti/apt-packages.txt | grep -vxF -f <(tr ' ' '\n' <<< "$ARM64_SOURCE_PACKAGES"); \
+         packages /tmp/sti/arm64-packages.txt; } | xargs -r apt-get install -y --no-install-recommends \
+    && source /opt/ros/humble/setup.bash \
+    && fetch() { git init -q "/tmp/pal/$1" && git -C "/tmp/pal/$1" fetch -q --depth 1 \
+         "https://github.com/pal-robotics/$1" "$2" && git -C "/tmp/pal/$1" checkout -q FETCH_HEAD; } \
+    && fetch omni_base_robot "$OMNI_BASE_ROBOT_COMMIT" \
+    && fetch tiago_pro_robot "$TIAGO_PRO_ROBOT_COMMIT" \
+    && fetch tiago_pro_moveit_config "$TIAGO_PRO_MOVEIT_CONFIG_COMMIT" \
+    && for package in omni_base_robot/omni_base_description tiago_pro_robot/tiago_pro_description \
+         tiago_pro_moveit_config; do \
+         cmake -S "/tmp/pal/$package" -B /tmp/pal/build -DCMAKE_INSTALL_PREFIX=/opt/ros/humble -DBUILD_TESTING=OFF \
+         && cmake --build /tmp/pal/build --target install && rm -rf /tmp/pal/build || exit 1; \
+       done \
+    && rm -rf /tmp/pal /var/lib/apt/lists/* /tmp/sti
+
+FROM packages-${TARGETARCH}
+ARG TARGETARCH
 
 # Ubuntu 22.04's Mesa 23.2 exposes only OpenGL 4.2 through WSL's Direct3D 12
 # driver, and Gazebo's ogre2 renderer aborts without OpenGL 4.3/GL_ARB_copy_image.

@@ -19,11 +19,10 @@ Windows, do everything below in an Ubuntu (WSL) terminal.
    python3 sim.py up
    ```
 
-The first start takes 10 to 20 minutes. When it prints `PASS`, Gazebo (the
-robot in the hospital) and RViz (its camera and lidar) open as windows. On
-macOS they are shown in your browser instead, at the address `up` prints.
+The first start takes 10 to 20 minutes. On macOS, Gazebo and RViz are shown in
+your browser, at the address `up` prints.
 
-Closing a window does not stop the simulation: it keeps running in the
+Closing a window does not stop the simulation. It keeps running in the
 background. Run `python3 sim.py up` again to get the windows back, or
 `python3 sim.py down` to stop it.
 
@@ -55,8 +54,7 @@ folder on your computer, so use any editor. Inside the simulation it is
 
 The keyboard control you just used is
 `workspace/src/sti_examples/sti_examples/keyboard_teleop.py`. It is one short
-file that shows how to drive the base and how to move a joint, and is meant to
-be copied from.
+file that shows how to drive the base and how to move a joint.
 
 Put your own ROS 2 packages next to it in `workspace/src/`, then build and run
 them the same way as the example:

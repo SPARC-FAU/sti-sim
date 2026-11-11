@@ -39,7 +39,8 @@ def generate_launch_description():
     )
     # The base isn't a ros2_control controller here: PAL's omni_drive_controller
     # isn't publicly released for Humble. initial_pose.add_planar_base adds the
-    # Gazebo systems serving /mobile_base_controller/{cmd_vel_unstamped,odom}.
+    # Gazebo systems that move the base and publish odometry, and
+    # base_controller.py serves /mobile_base_controller/cmd_vel_unstamped.
     # Server only: in combined mode Fortress's server waits for the GUI to hand
     # over the world, so a GUI stuck in graphics-driver initialisation would
     # also stop physics, sensors and spawning.
@@ -48,7 +49,9 @@ def generate_launch_description():
     spawn = ExecuteProcess(cmd=['python3', str(ROOT / 'scripts/spawn_robot.py')], output='screen')
     bridge = Node(package='ros_gz_bridge', executable='parameter_bridge', name='hospital_sensor_bridge',
                   parameters=[{'config_file': str(ROOT / 'config/tiago_bridge.yaml'), 'use_sim_time': True}], output='screen')
-    for process in (gazebo, bridge):
+    base = ExecuteProcess(cmd=['python3', str(ROOT / 'scripts/base_controller.py')],
+                          name='base_controller', output='screen')
+    for process in (gazebo, bridge, base):
         actions.append(RegisterEventHandler(OnProcessExit(target_action=process,
             on_exit=[EmitEvent(event=Shutdown(reason='An essential hospital process exited; inspect gazebo.log'))])))
     def spawn_exited(event, context):
@@ -56,5 +59,5 @@ def generate_launch_description():
             return [EmitEvent(event=Shutdown(reason='TIAGo spawn failed; inspect gazebo.log'))]
         return []
     actions.append(RegisterEventHandler(OnProcessExit(target_action=spawn, on_exit=spawn_exited)))
-    actions += [gazebo, bringup, spawn, bridge]
+    actions += [gazebo, bringup, spawn, bridge, base]
     return LaunchDescription(actions)

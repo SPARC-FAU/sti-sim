@@ -32,14 +32,26 @@ Open a terminal inside the simulation:
 python3 sim.py shell
 ```
 
-and drive with the keyboard:
+then build the example package and start its keyboard control:
 
 ```sh
-ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args \
-  -r cmd_vel:=/mobile_base_controller/cmd_vel_unstamped
+cd /workspace
+colcon build --symlink-install
+source /colcon/install/setup.bash
+ros2 run sti_examples keyboard_teleop
 ```
 
-The robot keeps moving until you send a stop (`k`).
+| Keys | Action |
+| --- | --- |
+| `w` `s` | Drive forward, backward |
+| `a` `d` | Turn left, right |
+| `q` `e` | Slide left, right |
+| space | Stop |
+| `t` `b` | Torso up, down |
+| `i` `k` `j` `l` | Head up, down, left, right |
+| `x` | Quit |
+
+The keys only work while the terminal is the active window.
 
 ## 3. Write your own code
 
@@ -47,8 +59,13 @@ The first start creates a `workspace/` folder next to `sim.py`. It is a normal
 folder on your computer, so use any editor. Inside the simulation it is
 `/workspace`.
 
-Put your ROS 2 packages in `workspace/src/`, then build and run them in a
-simulation terminal (`python3 sim.py shell`):
+The keyboard control you just used is
+`workspace/src/sti_examples/sti_examples/keyboard_teleop.py`. It is one short
+file that shows how to drive the base and how to move a joint, and is meant to
+be copied from.
+
+Put your own ROS 2 packages next to it in `workspace/src/`, then build and run
+them in a simulation terminal (`python3 sim.py shell`):
 
 ```sh
 cd /workspace
@@ -61,7 +78,8 @@ Topics to start with (`ros2 topic list` shows all of them):
 
 | Topic | Content |
 | --- | --- |
-| `/mobile_base_controller/cmd_vel_unstamped` | Drive the base (`geometry_msgs/Twist`) |
+| `/cmd_vel` | Drive the base (`geometry_msgs/Twist`). Publish repeatedly: the base stops 0.5 s after the last message. |
+| `/torso_controller/joint_trajectory`, `/head_controller/joint_trajectory` | Move the torso and head (`trajectory_msgs/JointTrajectory`) |
 | `/mobile_base_controller/odom` | Odometry |
 | `/scan_front_raw`, `/scan_rear_raw` | Lidars |
 | `/head_front_camera/color/image_raw` | Head camera |

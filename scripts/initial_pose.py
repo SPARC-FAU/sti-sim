@@ -52,7 +52,7 @@ VELOCITY_CONTROL = 'ignition::gazebo::systems::VelocityControl'
 ODOMETRY_PUBLISHER = 'ignition::gazebo::systems::OdometryPublisher'
 PLANAR_BASE = (
     ('ignition-gazebo-velocity-control-system', VELOCITY_CONTROL,
-     (('topic', '/mobile_base_controller/cmd_vel_unstamped'),)),
+     (('topic', '/mobile_base_controller/sim_velocity'),)),
     ('ignition-gazebo-odometry-publisher-system', ODOMETRY_PUBLISHER,
      (('odom_frame', 'odom'), ('robot_base_frame', 'base_footprint'),
       ('odom_topic', '/mobile_base_controller/odom'), ('tf_topic', '/mobile_base_controller/tf'),
@@ -66,8 +66,9 @@ def add_planar_base(description):
     PAL's mobile_base_controller type (omni_drive_controller) isn't publicly
     released for Humble. PAL's public Classic simulation instead moves the base
     with a planar-move plugin on the same ROS topics; these are the Fortress
-    equivalents. Commands on /mobile_base_controller/cmd_vel_unstamped
-    (x, y, yaw) move the robot and ground-truth odometry is published on
+    equivalents. base_controller.py reduces commands on
+    /mobile_base_controller/cmd_vel_unstamped to x, y and yaw and passes them
+    on as sim_velocity; ground-truth odometry is published on
     /mobile_base_controller/odom with the odom -> base_footprint transform.
     Wheels don't model mecanum rollers.
     """

@@ -1,8 +1,8 @@
 # Sensor transport names verified against PAL's humble-devel bridge configuration.
 # Native ros2_control provides joint states; don't bridge duplicates. The base
 # topics keep PAL's names but are served by Gazebo systems (see initial_pose.py).
-- ros_topic_name: /mobile_base_controller/cmd_vel_unstamped
-  gz_topic_name: /mobile_base_controller/cmd_vel_unstamped
+- ros_topic_name: /mobile_base_controller/sim_velocity  # from base_controller.py
+  gz_topic_name: /mobile_base_controller/sim_velocity
   ros_type_name: geometry_msgs/msg/Twist
   gz_type_name: ignition.msgs.Twist
   direction: ROS_TO_GZ

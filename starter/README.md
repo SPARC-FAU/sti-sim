@@ -15,6 +15,10 @@ source /colcon/install/setup.bash
 New terminals source `/colcon/install/setup.bash` automatically. Start your nodes
 with `--ros-args -p use_sim_time:=true`.
 
+`src/sti_examples` is an example package. Its keyboard control
+(`ros2 run sti_examples keyboard_teleop`) shows how to drive the base and move
+the torso and head.
+
 ## Moving your code
 
 This folder contains only your source code. Build output is kept separately in

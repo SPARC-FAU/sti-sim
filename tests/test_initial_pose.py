@@ -71,7 +71,7 @@ class InitialPose(unittest.TestCase):
         bridge = yaml.safe_load((ROOT/'config/tiago_bridge.yaml').read_text())
         bridged = {entry['gz_topic_name']: entry for entry in bridge}
         self.assertLessEqual(topics, set(bridged))
-        self.assertEqual(bridged['/mobile_base_controller/cmd_vel_unstamped']['direction'], 'ROS_TO_GZ')
+        self.assertEqual(bridged['/mobile_base_controller/sim_velocity']['direction'], 'ROS_TO_GZ')
         self.assertEqual(bridged['/mobile_base_controller/tf']['ros_topic_name'], '/tf')
         self.assertEqual(robot.findtext('gazebo/plugin/robot_base_frame'), 'base_footprint')
 

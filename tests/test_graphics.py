@@ -85,7 +85,7 @@ class PlanarBase(unittest.TestCase):
         root = pose.ET.fromstring(once)
         plugins = {p.get('name'): p for p in root.findall('gazebo/plugin')}
         self.assertEqual(plugins[pose.VELOCITY_CONTROL].findtext('topic'),
-                         '/mobile_base_controller/cmd_vel_unstamped')
+                         '/mobile_base_controller/sim_velocity')
         odometry = plugins[pose.ODOMETRY_PUBLISHER]
         self.assertEqual(odometry.findtext('odom_topic'), '/mobile_base_controller/odom')
         self.assertEqual(odometry.findtext('robot_base_frame'), 'base_footprint')
@@ -94,8 +94,8 @@ class PlanarBase(unittest.TestCase):
         import yaml
         entries = yaml.safe_load((ROOT/'config/tiago_bridge.yaml').read_text())
         topics = {(e['ros_topic_name'], e['gz_topic_name'], e['direction']) for e in entries}
-        self.assertIn(('/mobile_base_controller/cmd_vel_unstamped',
-                       '/mobile_base_controller/cmd_vel_unstamped', 'ROS_TO_GZ'), topics)
+        self.assertIn(('/mobile_base_controller/sim_velocity',
+                       '/mobile_base_controller/sim_velocity', 'ROS_TO_GZ'), topics)
         self.assertIn(('/mobile_base_controller/odom', '/mobile_base_controller/odom', 'GZ_TO_ROS'), topics)
         self.assertIn(('/tf', '/mobile_base_controller/tf', 'GZ_TO_ROS'), topics)
 

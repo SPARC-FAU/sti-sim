@@ -1,4 +1,8 @@
-"""PAL robot bring-up, explicit Fortress spawn, sensor bridge and RViz."""
+"""PAL robot bring-up, explicit Fortress spawn and sensor bridge.
+
+The Gazebo and RViz windows are opened by windows.sh, outside this launch, so
+closing one does not stop the simulation.
+"""
 import os
 from pathlib import Path
 
@@ -36,18 +40,15 @@ def generate_launch_description():
     # The base isn't a ros2_control controller here: PAL's omni_drive_controller
     # isn't publicly released for Humble. initial_pose.add_planar_base adds the
     # Gazebo systems serving /mobile_base_controller/{cmd_vel_unstamped,odom}.
-    # Separate server and GUI processes: in combined mode Fortress's server waits
-    # for the GUI to hand over the world, so a GUI stuck in graphics-driver
-    # initialisation would also stop physics, sensors and spawning.
+    # Server only: in combined mode Fortress's server waits for the GUI to hand
+    # over the world, so a GUI stuck in graphics-driver initialisation would
+    # also stop physics, sensors and spawning.
     gazebo = ExecuteProcess(cmd=['ign', 'gazebo', '-s', '-r', '-v', '3', str(ROOT / 'worlds/hospital.sdf')],
                             name='gazebo_server', output='screen')
-    gazebo_gui = ExecuteProcess(cmd=['ign', 'gazebo', '-g', '-v', '3'], name='gazebo_gui', output='screen')
     spawn = ExecuteProcess(cmd=['python3', str(ROOT / 'scripts/spawn_robot.py')], output='screen')
     bridge = Node(package='ros_gz_bridge', executable='parameter_bridge', name='hospital_sensor_bridge',
                   parameters=[{'config_file': str(ROOT / 'config/tiago_bridge.yaml'), 'use_sim_time': True}], output='screen')
-    rviz = Node(package='rviz2', executable='rviz2', name='rviz',
-                arguments=['-d', str(ROOT / 'config/hospital.rviz')], parameters=[{'use_sim_time': True}], output='screen')
-    for process in (gazebo, gazebo_gui, bridge, rviz):
+    for process in (gazebo, bridge):
         actions.append(RegisterEventHandler(OnProcessExit(target_action=process,
             on_exit=[EmitEvent(event=Shutdown(reason='An essential hospital process exited; inspect gazebo.log'))])))
     def spawn_exited(event, context):
@@ -55,5 +56,5 @@ def generate_launch_description():
             return [EmitEvent(event=Shutdown(reason='TIAGo spawn failed; inspect gazebo.log'))]
         return []
     actions.append(RegisterEventHandler(OnProcessExit(target_action=spawn, on_exit=spawn_exited)))
-    actions += [gazebo, gazebo_gui, bringup, spawn, bridge, rviz]
+    actions += [gazebo, bringup, spawn, bridge]
     return LaunchDescription(actions)

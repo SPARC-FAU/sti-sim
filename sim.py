@@ -84,6 +84,9 @@ def environment(mode, backend):
     env = os.environ.copy()
     env.update(host_user())
     env['STI_RENDER_MODE'] = mode
+    # Build attestations carry a timestamp, which gives an unchanged image a new
+    # ID on every build and makes `up` replace a running simulation.
+    env.setdefault('BUILDX_NO_DEFAULT_ATTESTATIONS', '1')
     if backend == 'wslgpu':
         env['STI_DXG_GID'] = str(os.stat('/dev/dxg').st_gid)
     if backend == 'dri':
@@ -206,6 +209,24 @@ def wait_ready(command, env):
     run(command + ['up', '-d', '--wait', '--wait-timeout', '180'], env)
 
 
+def stop_dead_simulation(command, env):
+    """Remove a container whose simulation has exited, so `up` starts a new one."""
+    def output(arguments):
+        return subprocess.run(command + arguments, cwd=ROOT, env=env, capture_output=True,
+                              text=True, timeout=30).stdout
+    try:
+        if not output(['ps', '-q', '--status', 'running', 'sim']).strip():
+            return
+        status = output(['exec', '-T', 'sim', 'supervisorctl', '-c',
+                         '/opt/sti/config/supervisord.conf', 'status', 'demo'])
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    if 'RUNNING' in status or 'STARTING' in status:
+        return
+    print('The simulation had stopped. Starting it again.', flush=True)
+    run(command + ['down'], env)
+
+
 GRAPHICS_FAILURE = 'STI graphics failure'
 
 
@@ -297,6 +318,7 @@ def main():
                 print(f"Created {ROOT / 'workspace'} from starter/.")
             # Build independently of GPU runtime availability.
             run(compose('cpu') + ['build'], env)
+            stop_dead_simulation(command, env)
             while True:
                 print(f'Starting {scene}: display={display}, backend={backend}, mode={mode}', flush=True)
                 write_state({'backend': backend, 'mode': mode, 'scene': scene, 'display': display})
@@ -308,6 +330,9 @@ def main():
                     run(command + ['exec', '-T', 'sim', 'bash', '-lc',
                                    'source /opt/ros/humble/setup.bash && python3 /opt/sti/scripts/check.py'], env)
                     run(command + ['exec', '-T', 'sim', 'grep', 'OpenGL renderer string', '/tmp/sti/renderer.log'], env)
+                    # Re-open windows the user closed; a window the graphics
+                    # driver cannot show counts as a failed start.
+                    run(command + ['exec', '-T', 'sim', '/opt/sti/scripts/windows.sh', '--verify'], env)
                     break
                 except subprocess.CalledProcessError:
                     failure = collect_diagnostics(command, env)
@@ -327,9 +352,11 @@ def main():
                     command = compose(backend, display)
             write_state({'backend': backend, 'mode': mode, 'scene': scene, 'display': display})
             if display == 'native':
-                print('Gazebo and RViz open as windows on your desktop.')
+                print('Gazebo and RViz are open as windows on your desktop.')
             else:
                 print(f"Open http://localhost:{env.get('STI_PORT', '6080')}/vnc.html?autoconnect=true&resize=scale")
+            print('Closing a window does not stop the simulation. Run "python3 sim.py up" again to\n'
+                  're-open it, or "python3 sim.py down" to stop.')
             print(f"Your code: {ROOT / 'workspace'} (/workspace in the container).\n"
                   'To move to a new version or another computer, copy that workspace/ folder across.')
         elif args.command == 'doctor':

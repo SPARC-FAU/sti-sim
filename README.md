@@ -20,6 +20,10 @@ The first start takes 10 to 20 minutes. When it prints `PASS`, Gazebo (the
 robot in the hospital) and RViz (its camera and lidar) open as windows. On
 macOS they are shown in your browser instead, at the address `up` prints.
 
+Closing a window does not stop the simulation: it keeps running in the
+background. Run `python3 sim.py up` again to get the windows back, or
+`python3 sim.py down` to stop it.
+
 ## 2. Drive the robot
 
 Open a terminal inside the simulation:
@@ -70,7 +74,7 @@ To continue on another computer or a new version of the simulation, copy the
 
 | Command | What it does |
 | --- | --- |
-| `python3 sim.py up` | Start |
+| `python3 sim.py up` | Start, or re-open closed windows |
 | `python3 sim.py down` | Stop |
 | `python3 sim.py shell` | Terminal inside the simulation |
 | `python3 sim.py check` | Test that the robot's sensors deliver data |
@@ -80,6 +84,7 @@ To continue on another computer or a new version of the simulation, copy the
 
 | Problem | Try this |
 | --- | --- |
+| You closed a window | Run `python3 sim.py up` again. |
 | `Docker is not running` | Start Docker Desktop, wait until it is ready, run `up` again. |
 | `permission denied` (Linux) | Run `sudo usermod -aG docker "$USER"`, log out and back in. Do not use `sudo` with `sim.py`. |
 | Startup ends with `FAIL` | Run `python3 sim.py down`, then `python3 sim.py up` again. |

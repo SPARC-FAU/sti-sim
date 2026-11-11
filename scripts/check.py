@@ -101,10 +101,13 @@ def main():
         counts['odom'] += 1
         positions.append((msg.pose.pose.position.x, msg.pose.pose.position.y))
 
+    # The image is subscribed reliably: an image is hundreds of UDP fragments,
+    # and a best-effort reader that also receives /clock and /tf loses whole
+    # images whenever the simulation runs fast.
     subscriptions = [
         node.create_subscription(Clock, '/clock', clock, qos_profile_sensor_data),
         node.create_subscription(LaserScan, '/scan_front_raw' if hospital else '/scan', scan, qos_profile_sensor_data),
-        node.create_subscription(Image, '/head_front_camera/color/image_raw' if hospital else '/camera/image_raw', image, qos_profile_sensor_data),
+        node.create_subscription(Image, '/head_front_camera/color/image_raw' if hospital else '/camera/image_raw', image, 5),
         node.create_subscription(Odometry, '/mobile_base_controller/odom' if hospital else '/odom', odom, qos_profile_sensor_data),
     ]
     if hospital:

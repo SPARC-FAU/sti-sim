@@ -6,6 +6,7 @@ if [[ "${STI_SCENE:-hospital}" == hospital ]]; then
   # start-up race that freezes Gazebo). Only that case is retried.
   for attempt in 1 2 3; do
     rm -f /tmp/sti/startup-stalled
+    /opt/sti/scripts/windows.sh
     /opt/sti/scripts/render.sh ros2 launch /opt/sti/scripts/hospital.launch.py > /tmp/sti/gazebo.log 2>&1 || true
     [[ -e /tmp/sti/startup-stalled ]] || break
     pkill -KILL -f 'ign gazebo' || true
@@ -29,16 +30,13 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 0' TERM INT
-# Separate server/GUI, as in the hospital launch: a stuck GUI can't stop physics.
+# Server only: the windows are separate (windows.sh) and may be closed.
 /opt/sti/scripts/render.sh ign gazebo -s -r /opt/sti/worlds/demo.sdf > /tmp/sti/gazebo.log 2>&1 &
 children+=("$!")
-/opt/sti/scripts/render.sh ign gazebo -g > /tmp/sti/gazebo-gui.log 2>&1 &
-children+=("$!")
+/opt/sti/scripts/windows.sh
 ros2 run ros_gz_bridge parameter_bridge --ros-args -p config_file:=/opt/sti/config/bridge.yaml > /tmp/sti/bridge.log 2>&1 &
 children+=("$!")
 ros2 run tf2_ros static_transform_publisher --x 0.23 --y 0 --z 0.18 --roll 0 --pitch 0 --yaw 0 --frame-id base_link --child-frame-id robot/base_link/lidar > /tmp/sti/tf.log 2>&1 &
-children+=("$!")
-/opt/sti/scripts/render.sh rviz2 -d /opt/sti/config/demo.rviz --ros-args -p use_sim_time:=true > /tmp/sti/rviz.log 2>&1 &
 children+=("$!")
 # Exit visibly if any essential application exits; don't silently loop a broken simulation.
 set +e

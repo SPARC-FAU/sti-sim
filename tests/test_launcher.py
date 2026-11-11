@@ -343,6 +343,32 @@ class DisplaySelection(unittest.TestCase):
         prepare.assert_not_called()
 
 
+class Restart(unittest.TestCase):
+    def outcome(self, container, status):
+        results = iter([sim.subprocess.CompletedProcess([], 0, container, ''),
+                        sim.subprocess.CompletedProcess([], 0, status, '')])
+        with patch.object(sim.subprocess, 'run', side_effect=lambda *a, **k: next(results)), \
+             patch.object(sim, 'run') as run, patch('builtins.print'):
+            sim.stop_dead_simulation(['docker', 'compose'], {})
+        return [call.args[0] for call in run.call_args_list]
+
+    def test_running_simulation_is_kept(self):
+        self.assertEqual(self.outcome('abc123\n', 'demo   RUNNING   pid 40, uptime 0:10:00\n'), [])
+
+    def test_nothing_is_stopped_when_no_container_runs(self):
+        self.assertEqual(self.outcome('', ''), [])
+
+    def test_container_with_an_exited_simulation_is_removed(self):
+        self.assertEqual(self.outcome('abc123\n', 'demo   EXITED   Nov 11 10:00 AM\n'),
+                         [['docker', 'compose', 'down']])
+
+    def test_windows_are_opened_outside_the_launch(self):
+        launch = (sim.ROOT / 'scripts/hospital.launch.py').read_text()
+        self.assertNotIn('rviz2', launch)
+        self.assertNotIn("'-g'", launch)
+        self.assertIn('windows.sh', (sim.ROOT / 'scripts/demo.sh').read_text())
+
+
 class DockerAccess(unittest.TestCase):
     def test_permission_error_explains_fix_without_invoking_sudo(self):
         result = sim.subprocess.CompletedProcess(['docker'], 1, '', 'permission denied connecting to docker.sock')

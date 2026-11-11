@@ -6,17 +6,18 @@ It runs in Docker on Linux, Windows and macOS.
 ## 1. Start the simulation
 
 You need [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-(Windows, macOS) or Docker Engine (Linux), and Python 3.10 or newer.
+(Windows, macOS) or Docker Engine (Linux), and Python 3.10 or newer. On
+Windows, do everything below in an Ubuntu (WSL) terminal.
 
-Download `2026_09_01_RoboCup_HCC_Arena_V1.glb` (the hospital model) from the course
-forum and put it in the `worlds` folder. Then start Docker, open a terminal in
-this folder and run:
+1. Get this folder: `git clone https://github.com/SPARC-FAU/sti-sim.git`, or
+   *Code → Download ZIP* on GitHub.
+2. Download `2026_09_01_RoboCup_HCC_Arena_V1.glb` (the hospital model) from the
+   course forum and put it in the `worlds` folder.
+3. Start Docker, open a terminal in the folder and run:
 
-```sh
-python3 sim.py up
-```
-
-On Windows, use an Ubuntu (WSL) terminal.
+   ```sh
+   python3 sim.py up
+   ```
 
 The first start takes 10 to 20 minutes. When it prints `PASS`, Gazebo (the
 robot in the hospital) and RViz (its camera and lidar) open as windows. On
@@ -43,19 +44,8 @@ source /colcon/install/setup.bash
 ros2 run sti_examples keyboard_teleop
 ```
 
-Hold a key to move; the robot stops when you release it.
-
-| Keys | Action |
-| --- | --- |
-| `w` `s` | Drive forward, backward |
-| `a` `d` | Turn left, right |
-| `q` `e` | Slide left, right |
-| `t` `b` | Torso up, down |
-| `i` `k` `j` `l` | Head up, down, left, right |
-| `r` | Reset the simulation: robot back to where and how it started |
-| `x` | Quit |
-
-The keys only work while the terminal is the active window.
+The terminal lists the keys. Hold one to move; the robot stops when you
+release it. The keys only work while that terminal is the active window.
 
 ## 3. Write your own code
 
@@ -69,12 +59,9 @@ file that shows how to drive the base and how to move a joint, and is meant to
 be copied from.
 
 Put your own ROS 2 packages next to it in `workspace/src/`, then build and run
-them in a simulation terminal (`python3 sim.py shell`):
+them the same way as the example:
 
 ```sh
-cd /workspace
-colcon build --symlink-install
-source /colcon/install/setup.bash
 ros2 run <your_package> <your_node> --ros-args -p use_sim_time:=true
 ```
 
@@ -89,8 +76,9 @@ Topics to start with (`ros2 topic list` shows all of them):
 | `/head_front_camera/color/image_raw` | Head camera |
 | `/joint_states`, `/tf` | Joints and transforms |
 
-To continue on another computer or a new version of the simulation, copy the
-`workspace/` folder into the new simulation folder and run `colcon build` again.
+Updating the simulation (`git pull`, then `python3 sim.py up`) leaves
+`workspace/` untouched. To continue on another computer, copy the `workspace/`
+folder there and run `colcon build` again.
 
 ## Commands
 
@@ -106,7 +94,6 @@ To continue on another computer or a new version of the simulation, copy the
 
 | Problem | Try this |
 | --- | --- |
-| You closed a window | Run `python3 sim.py up` again. |
 | `Docker is not running` | Start Docker Desktop, wait until it is ready, run `up` again. |
 | `permission denied` (Linux) | Run `sudo usermod -aG docker "$USER"`, log out and back in. Do not use `sudo` with `sim.py`. |
 | Startup ends with `FAIL` | Run `python3 sim.py down`, then `python3 sim.py up` again. |

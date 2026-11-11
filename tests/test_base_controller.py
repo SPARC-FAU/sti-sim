@@ -47,12 +47,17 @@ class ExampleTeleop(unittest.TestCase):
     def test_reset_pose_is_within_the_joint_limits(self):
         self.assertEqual(set(self.teleop.HOME), set(self.teleop.JOINT_LIMITS))
         for joint, position in self.teleop.HOME.items():
-            self.assertEqual(self.teleop.clamp(position, self.teleop.JOINT_LIMITS[joint]), position)
+            low, high = self.teleop.JOINT_LIMITS[joint]
+            self.assertTrue(low <= position <= high)
 
-    def test_torso_target_stays_within_its_limits(self):
-        limits = self.teleop.JOINT_LIMITS['torso_lift_joint']
-        self.assertEqual(self.teleop.clamp(0.36, limits), 0.35)
-        self.assertEqual(self.teleop.clamp(-0.02, limits), 0.0)
+    def test_held_key_target_stays_within_the_joint_limits(self):
+        self.assertEqual(self.teleop.joint_limit('torso_lift_joint', 1), 0.35)
+        self.assertEqual(self.teleop.joint_limit('torso_lift_joint', -1), 0.0)
+
+    def test_no_held_key_means_a_standing_base(self):
+        for key in (None, 't', 'r', ' '):
+            velocity = self.teleop.base_velocity(key)
+            self.assertEqual((velocity.linear.x, velocity.linear.y, velocity.angular.z), (0, 0, 0))
 
     def test_joint_command_addresses_all_joints_of_the_controller(self):
         command = self.teleop.joint_command(['head_1_joint', 'head_2_joint'],

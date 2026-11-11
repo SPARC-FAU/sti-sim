@@ -41,15 +41,16 @@ source /colcon/install/setup.bash
 ros2 run sti_examples keyboard_teleop
 ```
 
+Hold a key to move; the robot stops when you release it.
+
 | Keys | Action |
 | --- | --- |
 | `w` `s` | Drive forward, backward |
 | `a` `d` | Turn left, right |
 | `q` `e` | Slide left, right |
-| space | Stop |
 | `t` `b` | Torso up, down |
 | `i` `k` `j` `l` | Head up, down, left, right |
-| `r` | Reset: stop, torso and head back to the starting pose |
+| `r` | Reset the torso and head to the starting pose |
 | `x` | Quit |
 
 The keys only work while the terminal is the active window.

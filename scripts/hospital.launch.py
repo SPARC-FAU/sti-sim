@@ -51,6 +51,8 @@ def generate_launch_description():
                   parameters=[{'config_file': str(ROOT / 'config/tiago_bridge.yaml'), 'use_sim_time': True}], output='screen')
     base = ExecuteProcess(cmd=['python3', str(ROOT / 'scripts/base_controller.py')],
                           name='base_controller', output='screen')
+    reset = ExecuteProcess(cmd=['python3', str(ROOT / 'scripts/reset_service.py')],
+                           name='reset_service', output='screen')
     for process in (gazebo, bridge, base):
         actions.append(RegisterEventHandler(OnProcessExit(target_action=process,
             on_exit=[EmitEvent(event=Shutdown(reason='An essential hospital process exited; inspect gazebo.log'))])))
@@ -59,5 +61,5 @@ def generate_launch_description():
             return [EmitEvent(event=Shutdown(reason='TIAGo spawn failed; inspect gazebo.log'))]
         return []
     actions.append(RegisterEventHandler(OnProcessExit(target_action=spawn, on_exit=spawn_exited)))
-    actions += [gazebo, bringup, spawn, bridge, base]
+    actions += [gazebo, bringup, spawn, bridge, base, reset]
     return LaunchDescription(actions)

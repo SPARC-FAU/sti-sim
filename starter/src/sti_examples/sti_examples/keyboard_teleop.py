@@ -20,6 +20,7 @@ from geometry_msgs.msg import Twist
 from rclpy.duration import Duration
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
+from std_srvs.srv import Trigger
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 HELP = """
@@ -33,7 +34,7 @@ Base            Torso          Head
   q  slide left
   e  slide right
 
-r  reset: torso and head back to their starting pose
+r  reset the simulation: robot back to where and how it started
 x or Ctrl-C quits.
 """
 
@@ -78,11 +79,6 @@ JOINT_SPEED = {  # how fast to move; the torso cannot exceed 0.035 m/s
     'head_1_joint': 0.5,       # rad/s
     'head_2_joint': 0.5,
 }
-HOME = {  # the pose the simulation starts in, restored by `r`
-    'torso_lift_joint': 0.1,
-    'head_1_joint': 0.0,
-    'head_2_joint': 0.0,
-}
 CONTROLLERS = {  # controller topic: the joints it moves, in its order
     '/torso_controller/joint_trajectory': ['torso_lift_joint'],
     '/head_controller/joint_trajectory': ['head_1_joint', 'head_2_joint'],
@@ -103,7 +99,7 @@ def joint_command(joints, targets, positions):
 
 # To move a joint only while a key is held: pressing the key sends the joint
 # towards its limit, releasing it sets the target to the current position,
-# which stops the joint.
+# which stops the joint. The controller's other joints stay where they are.
 JOINT_KEYS = {  # key: (joint, direction)
     't': ('torso_lift_joint', 1), 'b': ('torso_lift_joint', -1),
     'j': ('head_1_joint', 1), 'l': ('head_1_joint', -1),
@@ -136,22 +132,26 @@ def main():
     base = node.create_publisher(Twist, '/key_vel', 1)
     controllers = {topic: node.create_publisher(JointTrajectory, topic, 1) for topic in CONTROLLERS}
 
-    # Where the joints are now (from /joint_states) and where they should go.
+    # /reset_simulation exists only in the simulation: it puts the robot back
+    # where and how it started. A real robot has no such service.
+    reset = node.create_client(Trigger, '/reset_simulation')
+
+    # Where the joints are now, from /joint_states.
     positions = {}
-    targets = {}
 
     def joint_states(states):
         for name, position in zip(states.name, states.position):
             if name in JOINT_LIMITS:
                 positions[name] = position
-                targets.setdefault(name, position)  # start from the current pose
 
     node.create_subscription(JointState, '/joint_states', joint_states, 1)
 
-    def send(joints):
-        """Send the current targets to every controller that owns one of `joints`."""
+    def move(joint, target):
+        """Send `joint` to `target`; other joints of its controller stay put."""
+        targets = dict(positions)
+        targets[joint] = target
         for topic, names in CONTROLLERS.items():
-            if any(joint in names for joint in joints):
+            if joint in names:
                 controllers[topic].publish(joint_command(names, targets, positions))
 
     held = None        # the key currently held down
@@ -165,6 +165,8 @@ def main():
             key = read_key(timeout=0.1)
             if key in ('x', '\x03'):
                 break
+            if key == 'r' and held != 'r':  # once per press, not while held
+                reset.call_async(Trigger.Request())
             if key is not None:
                 held, last_seen = key, time.monotonic()
             elif time.monotonic() - last_seen > KEY_HOLD:
@@ -175,21 +177,13 @@ def main():
             ready = len(positions) == len(JOINT_LIMITS)
             joint_key = held if held in JOINT_KEYS else None
             if joint_key != moving and ready:
-                changed = []
                 if moving:  # released: stop where the joint is now
                     joint, _ = JOINT_KEYS[moving]
-                    targets[joint] = positions[joint]
-                    changed.append(joint)
+                    move(joint, positions[joint])
                 if joint_key:  # pressed: head for the limit
                     joint, direction = JOINT_KEYS[joint_key]
-                    targets[joint] = joint_limit(joint, direction)
-                    changed.append(joint)
-                send(changed)
+                    move(joint, joint_limit(joint, direction))
                 moving = joint_key
-
-            if key == 'r' and ready:
-                targets.update(HOME)
-                send(HOME)
             rclpy.spin_once(node, timeout_sec=0)
     except KeyboardInterrupt:
         pass

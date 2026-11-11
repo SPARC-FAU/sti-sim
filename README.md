@@ -50,7 +50,7 @@ Hold a key to move; the robot stops when you release it.
 | `q` `e` | Slide left, right |
 | `t` `b` | Torso up, down |
 | `i` `k` `j` `l` | Head up, down, left, right |
-| `r` | Reset the torso and head to the starting pose |
+| `r` | Reset the simulation: robot back to where and how it started |
 | `x` | Quit |
 
 The keys only work while the terminal is the active window.

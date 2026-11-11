@@ -29,6 +29,23 @@ class Base(unittest.TestCase):
 
 
 @unittest.skipIf(Twist is None, 'ROS 2 unavailable')
+class Reset(unittest.TestCase):
+    def setUp(self):
+        self.reset = load('scripts/reset_service.py', 'reset_service')
+
+    def test_request_places_the_robot_at_its_spawn_pose(self):
+        request = self.reset.spawn_request({'x': 1.0, 'y': 0.0, 'z': 0.05, 'yaw': 3.141592653589793})
+        self.assertIn('name: "tiago_pro"', request)
+        self.assertIn('position: {x: 1.0, y: 0.0, z: 0.0}', request)
+        self.assertIn('orientation: {z: 1.0,', request)
+
+    def test_the_torso_gets_enough_time_to_return(self):
+        seconds = self.reset.move_seconds(['torso_lift_joint'], [0.1], {'torso_lift_joint': 0.35})
+        self.assertGreaterEqual(seconds, 0.25 / 0.035)
+        self.assertEqual(self.reset.move_seconds(['head_1_joint'], [0.0], {}), 1.0)
+
+
+@unittest.skipIf(Twist is None, 'ROS 2 unavailable')
 class ExampleTeleop(unittest.TestCase):
     def setUp(self):
         self.teleop = load('starter/src/sti_examples/sti_examples/keyboard_teleop.py', 'keyboard_teleop')
@@ -43,12 +60,6 @@ class ExampleTeleop(unittest.TestCase):
         for joint, _ in self.teleop.JOINT_KEYS.values():
             self.assertIn(joint, self.teleop.JOINT_LIMITS)
             self.assertIn(joint, controlled)
-
-    def test_reset_pose_is_within_the_joint_limits(self):
-        self.assertEqual(set(self.teleop.HOME), set(self.teleop.JOINT_LIMITS))
-        for joint, position in self.teleop.HOME.items():
-            low, high = self.teleop.JOINT_LIMITS[joint]
-            self.assertTrue(low <= position <= high)
 
     def test_held_key_target_stays_within_the_joint_limits(self):
         self.assertEqual(self.teleop.joint_limit('torso_lift_joint', 1), 0.35)
